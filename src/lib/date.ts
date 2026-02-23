@@ -14,7 +14,7 @@ export function formatResetDate(value?: string): string {
   }).format(date);
 }
 
-export function formatRelativeTimestamp(value?: string): string {
+export function formatRelativeTimestamp(value?: string, referenceTimeMs = Date.now()): string {
   if (!value) {
     return "never";
   }
@@ -24,7 +24,7 @@ export function formatRelativeTimestamp(value?: string): string {
     return "never";
   }
 
-  const deltaMs = date.getTime() - Date.now();
+  const deltaMs = date.getTime() - referenceTimeMs;
   const deltaMinutes = Math.round(deltaMs / (1000 * 60));
   const rtf = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
 
@@ -39,4 +39,25 @@ export function formatRelativeTimestamp(value?: string): string {
 
   const deltaDays = Math.round(deltaHours / 24);
   return rtf.format(deltaDays, "day");
+}
+
+export function formatRemainingDaysHours(value?: string, referenceTimeMs = Date.now()): string {
+  if (!value) {
+    return "";
+  }
+
+  const targetMs = Date.parse(value);
+  if (Number.isNaN(targetMs)) {
+    return "";
+  }
+
+  const deltaMs = targetMs - referenceTimeMs;
+  if (deltaMs <= 0) {
+    return "0d 0h";
+  }
+
+  const totalHours = Math.floor(deltaMs / (1000 * 60 * 60));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days}d ${hours}h`;
 }

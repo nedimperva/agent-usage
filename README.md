@@ -6,8 +6,11 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 
 - Unified dashboard for Codex, Claude, and Copilot.
 - Progress rings based on real remaining percentage.
-- Optional reset date and trend badge display.
+- Alert-first section with warning (`<=25%`) and critical (`<=10%`) thresholds.
+- Alert messages include reset countdowns (`Xd Yh`) and last update time.
+- Optional reset date and trend badge display in provider rows.
 - Copilot device login flow inside the command.
+- Quick auth-repair actions from list items and alerts.
 - Codex manual import fallback when auto-fetch is unavailable.
 
 ## Data sources
@@ -15,6 +18,7 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 - Codex: ChatGPT usage endpoint (`/backend-api/wham/usage`) with your existing Codex login session.
 - Claude: OAuth usage endpoint (`https://api.anthropic.com/api/oauth/usage`) with your existing Claude login session.
 - Copilot: GitHub Copilot endpoint (`https://api.github.com/copilot_internal/user`) with device flow or token auth.
+  - If reset timestamps are missing in the response, Copilot resets default to the next first-of-month boundary.
 
 ## Requirements
 
@@ -95,4 +99,4 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
 ## Known limitations
 
 - Provider endpoints can change.
-- Some providers do not expose reset timestamps for every quota.
+- Some provider reset timestamps can be missing or approximate (Copilot uses first-of-month fallback when absent).

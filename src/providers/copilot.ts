@@ -1,5 +1,5 @@
 import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
-import { parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
+import { parseDateLike, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
 
 const GITHUB_BASE_URL = "https://api.github.com";
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -17,6 +17,14 @@ export interface CopilotDeviceCodeResponse {
 interface CopilotQuotaSnapshot {
   percent_remaining?: unknown;
   percentRemaining?: unknown;
+  resets_at?: unknown;
+  resetsAt?: unknown;
+  reset_at?: unknown;
+  resetAt?: unknown;
+  next_reset_at?: unknown;
+  nextResetAt?: unknown;
+  renews_at?: unknown;
+  renewsAt?: unknown;
 }
 
 interface CopilotInternalResponse {
@@ -47,12 +55,34 @@ function readQuotaPercent(snapshot: CopilotQuotaSnapshot | undefined): number | 
   return normalizePercent(remaining);
 }
 
-export function extractCopilotQuotaItems(payload: unknown): QuotaItem[] {
-  const usage = (payload as CopilotInternalResponse | undefined) ?? {};
-  const premiumRemaining = readQuotaPercent(
-    usage.quotaSnapshots?.premiumInteractions ?? usage.quota_snapshots?.premium_interactions,
+function readQuotaResetAt(snapshot: CopilotQuotaSnapshot | undefined): string | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+
+  return (
+    parseDateLike(snapshot.resets_at) ??
+    parseDateLike(snapshot.resetsAt) ??
+    parseDateLike(snapshot.reset_at) ??
+    parseDateLike(snapshot.resetAt) ??
+    parseDateLike(snapshot.next_reset_at) ??
+    parseDateLike(snapshot.nextResetAt) ??
+    parseDateLike(snapshot.renews_at) ??
+    parseDateLike(snapshot.renewsAt)
   );
-  const chatRemaining = readQuotaPercent(usage.quotaSnapshots?.chat ?? usage.quota_snapshots?.chat);
+}
+
+function nextCopilotMonthlyResetAt(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0)).toISOString();
+}
+
+export function extractCopilotQuotaItems(payload: unknown, now = new Date()): QuotaItem[] {
+  const usage = (payload as CopilotInternalResponse | undefined) ?? {};
+  const premiumSnapshot = usage.quotaSnapshots?.premiumInteractions ?? usage.quota_snapshots?.premium_interactions;
+  const chatSnapshot = usage.quotaSnapshots?.chat ?? usage.quota_snapshots?.chat;
+  const premiumRemaining = readQuotaPercent(premiumSnapshot);
+  const chatRemaining = readQuotaPercent(chatSnapshot);
+  const defaultResetAt = nextCopilotMonthlyResetAt(now);
   const quotas: QuotaItem[] = [];
 
   if (premiumRemaining !== undefined) {
@@ -61,6 +91,7 @@ export function extractCopilotQuotaItems(payload: unknown): QuotaItem[] {
       label: "Premium Requests",
       remainingPercent: premiumRemaining,
       remainingDisplay: `${premiumRemaining.toFixed(1).replace(/\.0$/, "")}% left`,
+      resetAt: readQuotaResetAt(premiumSnapshot) ?? defaultResetAt,
       status: statusFromRemainingPercent(premiumRemaining),
     });
   }
@@ -71,6 +102,7 @@ export function extractCopilotQuotaItems(payload: unknown): QuotaItem[] {
       label: "Chat Quota",
       remainingPercent: chatRemaining,
       remainingDisplay: `${chatRemaining.toFixed(1).replace(/\.0$/, "")}% left`,
+      resetAt: readQuotaResetAt(chatSnapshot) ?? defaultResetAt,
       status: statusFromRemainingPercent(chatRemaining),
     });
   }

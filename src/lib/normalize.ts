@@ -48,7 +48,7 @@ export function statusFromRemainingPercent(remainingPercent?: number): QuotaStat
     return "unknown";
   }
 
-  if (remainingPercent < CRITICAL_THRESHOLD) {
+  if (remainingPercent <= CRITICAL_THRESHOLD) {
     return "critical";
   }
 
@@ -70,16 +70,33 @@ export function formatPercent(value?: number): string {
 }
 
 export function parseDateLike(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) {
+  let parsedMs: number;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    parsedMs = Date.parse(trimmed);
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    // Values below year-2001 milliseconds are treated as Unix seconds.
+    parsedMs = value > 1_000_000_000_000 ? value : value * 1000;
+  } else if (value instanceof Date) {
+    parsedMs = value.getTime();
+  } else {
     return undefined;
   }
 
-  const parsedMs = Date.parse(value);
-  if (!Number.isNaN(parsedMs)) {
-    return new Date(parsedMs).toISOString();
+  if (Number.isNaN(parsedMs) || !Number.isFinite(parsedMs)) {
+    return undefined;
   }
 
-  return undefined;
+  const normalizedDate = new Date(parsedMs);
+  if (Number.isNaN(normalizedDate.getTime())) {
+    return undefined;
+  }
+
+  return normalizedDate.toISOString();
 }
 
 export function formatCompactNumber(value: number): string {

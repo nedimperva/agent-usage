@@ -14,6 +14,7 @@ import {
   showToast,
 } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { deriveSnapshotAlerts, summarizeAlerts } from "./lib/alerts";
 import { formatRelativeTimestamp } from "./lib/date";
 import { quotaAccessories, quotaProgressIcon, statusIcon } from "./lib/format";
 import { loadDashboardState, mapSnapshotsByProvider, saveDashboardState } from "./lib/storage";
@@ -477,9 +478,135 @@ export default function Command() {
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
   }, [snapshots]);
+  const hasStoredCopilotToken = !!copilotTokenState?.trim();
+
+  const repairProviderAuth = useCallback(
+    async (provider: ProviderId) => {
+      if (provider === "codex") {
+        await Clipboard.copy("codex login");
+        await openExtensionPreferences();
+        await showToast({
+          title: "Codex auth repair",
+          message: "Copied `codex login`. Run it in terminal, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "claude") {
+        await Clipboard.copy("claude login");
+        await openExtensionPreferences();
+        await showToast({
+          title: "Claude auth repair",
+          message: "Copied `claude login`. Run it in terminal, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      const pending = pendingCopilotLogin;
+      if (pending && !isPendingCopilotLoginExpired(pending)) {
+        await completeCopilotDeviceFlow();
+        return;
+      }
+
+      await startCopilotDeviceFlow();
+    },
+    [completeCopilotDeviceFlow, isPendingCopilotLoginExpired, pendingCopilotLogin, startCopilotDeviceFlow],
+  );
+
+  const renderSnapshotActions = useCallback(
+    (snapshot: ProviderUsageSnapshot) => (
+      <ActionPanel>
+        <Action title="Refresh All" icon={Icon.ArrowClockwise} onAction={() => void refreshRemoteProviders(true)} />
+        <Action.Push
+          title="Import Codex Usage"
+          icon={Icon.Upload}
+          target={<CodexImportForm onImport={importCodexPayload} />}
+        />
+        {snapshot.provider === "copilot" && (
+          <Action title="Start Copilot Device Login" icon={Icon.Link} onAction={() => void startCopilotDeviceFlow()} />
+        )}
+        {snapshot.provider === "copilot" && pendingCopilotLogin && (
+          <Action
+            title="Complete Copilot Device Login"
+            icon={Icon.CheckCircle}
+            onAction={() => void completeCopilotDeviceFlow()}
+          />
+        )}
+        {snapshot.provider === "copilot" && pendingCopilotLogin && (
+          <Action
+            title="Copy Copilot Device Code"
+            icon={Icon.Clipboard}
+            onAction={() => void Clipboard.copy(pendingCopilotLogin.userCode)}
+          />
+        )}
+        {snapshot.provider === "copilot" && pendingCopilotLogin && (
+          <Action.OpenInBrowser
+            title="Open GitHub Device Verification"
+            icon={Icon.Globe}
+            url={pendingCopilotLogin.verificationUri}
+          />
+        )}
+        {snapshot.provider === "copilot" && pendingCopilotLogin && (
+          <Action
+            title="Cancel Copilot Device Login"
+            icon={Icon.Trash}
+            onAction={() => void clearPendingCopilotLogin()}
+          />
+        )}
+        {snapshot.provider === "copilot" && (
+          <Action.Push
+            title="Set Copilot Token"
+            icon={Icon.Key}
+            target={<CopilotTokenForm onSave={saveCopilotToken} />}
+          />
+        )}
+        {snapshot.provider === "copilot" && hasStoredCopilotToken && (
+          <Action
+            title="Clear Stored Copilot Token"
+            icon={Icon.XMarkCircle}
+            onAction={() => void clearStoredCopilotToken()}
+          />
+        )}
+        <Action
+          title={`Repair ${PROVIDER_TITLES[snapshot.provider]} Auth`}
+          icon={Icon.Gear}
+          onAction={() => void repairProviderAuth(snapshot.provider)}
+        />
+        <Action.OpenInBrowser
+          title={`Open ${PROVIDER_TITLES[snapshot.provider]} Usage Page`}
+          icon={Icon.Globe}
+          url={providerUrl(snapshot.provider, preferences)}
+        />
+        <Action.CopyToClipboard
+          title={`Copy ${PROVIDER_TITLES[snapshot.provider]} Raw Snapshot`}
+          icon={Icon.Clipboard}
+          content={JSON.stringify(snapshot, null, 2)}
+        />
+        <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
+      </ActionPanel>
+    ),
+    [
+      clearPendingCopilotLogin,
+      clearStoredCopilotToken,
+      completeCopilotDeviceFlow,
+      hasStoredCopilotToken,
+      importCodexPayload,
+      pendingCopilotLogin,
+      preferences,
+      refreshRemoteProviders,
+      repairProviderAuth,
+      saveCopilotToken,
+      startCopilotDeviceFlow,
+    ],
+  );
+
+  const alerts = useMemo(() => deriveSnapshotAlerts(renderedSnapshots), [renderedSnapshots]);
+  const alertSummary = useMemo(() => summarizeAlerts(alerts), [alerts]);
+  const snapshotsByProvider = useMemo(() => mapSnapshotsByProvider(renderedSnapshots), [renderedSnapshots]);
 
   const isBusy = isLoading || isRefreshing;
-  const hasStoredCopilotToken = !!copilotTokenState?.trim();
   const pendingCopilotExpiresAt =
     pendingCopilotLogin && !isPendingCopilotLoginExpired(pendingCopilotLogin)
       ? new Date(Date.parse(pendingCopilotLogin.createdAt) + pendingCopilotLogin.expiresIn * 1000).toISOString()
@@ -487,6 +614,65 @@ export default function Command() {
 
   return (
     <List isLoading={isBusy} searchBarPlaceholder="Search usage limits...">
+      <List.Section
+        title="Alerts"
+        subtitle={
+          alerts.length > 0 ? `${alertSummary.critical} critical, ${alertSummary.warning} warning` : "No active alerts"
+        }
+      >
+        {alerts.length === 0 ? (
+          <List.Item
+            icon={statusIcon("ok")}
+            title="All quotas healthy"
+            subtitle="No warning or critical usage thresholds are active."
+            actions={
+              <ActionPanel>
+                <Action
+                  title="Refresh All"
+                  icon={Icon.ArrowClockwise}
+                  onAction={() => void refreshRemoteProviders(true)}
+                />
+              </ActionPanel>
+            }
+          />
+        ) : (
+          alerts.map((alert) => {
+            const snapshot = snapshotsByProvider[alert.provider];
+
+            return (
+              <List.Item
+                key={alert.id}
+                icon={statusIcon(alert.severity)}
+                title={`${PROVIDER_TITLES[alert.provider]}: ${alert.label}`}
+                subtitle={`${alert.message} ${alert.recommendedAction}`}
+                actions={
+                  snapshot ? (
+                    renderSnapshotActions(snapshot)
+                  ) : (
+                    <ActionPanel>
+                      <Action
+                        title="Refresh All"
+                        icon={Icon.ArrowClockwise}
+                        onAction={() => void refreshRemoteProviders(true)}
+                      />
+                      <Action
+                        title={`Repair ${PROVIDER_TITLES[alert.provider]} Auth`}
+                        icon={Icon.Gear}
+                        onAction={() => void repairProviderAuth(alert.provider)}
+                      />
+                      <Action.OpenInBrowser
+                        title={`Open ${PROVIDER_TITLES[alert.provider]} Usage Page`}
+                        icon={Icon.Globe}
+                        url={providerUrl(alert.provider, preferences)}
+                      />
+                    </ActionPanel>
+                  )
+                }
+              />
+            );
+          })
+        )}
+      </List.Section>
       {renderedSnapshots.map((snapshot) => (
         <List.Section
           key={snapshot.provider}
@@ -500,80 +686,7 @@ export default function Command() {
               title={quota.label}
               subtitle={quota.remainingDisplay}
               accessories={quotaAccessories(quota)}
-              actions={
-                <ActionPanel>
-                  <Action
-                    title="Refresh All"
-                    icon={Icon.ArrowClockwise}
-                    onAction={() => void refreshRemoteProviders(true)}
-                  />
-                  <Action.Push
-                    title="Import Codex Usage"
-                    icon={Icon.Upload}
-                    target={<CodexImportForm onImport={importCodexPayload} />}
-                  />
-                  {snapshot.provider === "copilot" && (
-                    <Action
-                      title="Start Copilot Device Login"
-                      icon={Icon.Link}
-                      onAction={() => void startCopilotDeviceFlow()}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && pendingCopilotLogin && (
-                    <Action
-                      title="Complete Copilot Device Login"
-                      icon={Icon.CheckCircle}
-                      onAction={() => void completeCopilotDeviceFlow()}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && pendingCopilotLogin && (
-                    <Action
-                      title="Copy Copilot Device Code"
-                      icon={Icon.Clipboard}
-                      onAction={() => void Clipboard.copy(pendingCopilotLogin.userCode)}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && pendingCopilotLogin && (
-                    <Action.OpenInBrowser
-                      title="Open GitHub Device Verification"
-                      icon={Icon.Globe}
-                      url={pendingCopilotLogin.verificationUri}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && pendingCopilotLogin && (
-                    <Action
-                      title="Cancel Copilot Device Login"
-                      icon={Icon.Trash}
-                      onAction={() => void clearPendingCopilotLogin()}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && (
-                    <Action.Push
-                      title="Set Copilot Token"
-                      icon={Icon.Key}
-                      target={<CopilotTokenForm onSave={saveCopilotToken} />}
-                    />
-                  )}
-                  {snapshot.provider === "copilot" && hasStoredCopilotToken && (
-                    <Action
-                      title="Clear Stored Copilot Token"
-                      icon={Icon.XMarkCircle}
-                      onAction={() => void clearStoredCopilotToken()}
-                    />
-                  )}
-                  <Action.OpenInBrowser
-                    title={`Open ${PROVIDER_TITLES[snapshot.provider]} Usage Page`}
-                    icon={Icon.Globe}
-                    url={providerUrl(snapshot.provider, preferences)}
-                  />
-                  <Action.CopyToClipboard
-                    title={`Copy ${PROVIDER_TITLES[snapshot.provider]} Raw Snapshot`}
-                    icon={Icon.Clipboard}
-                    content={JSON.stringify(snapshot, null, 2)}
-                  />
-                  <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
-                </ActionPanel>
-              }
+              actions={renderSnapshotActions(snapshot)}
             />
           ))}
           {snapshot.errors?.map((error, index) => (
@@ -582,16 +695,7 @@ export default function Command() {
               icon={statusIcon("critical")}
               title="Provider Warning"
               subtitle={error}
-              actions={
-                <ActionPanel>
-                  <Action
-                    title="Refresh All"
-                    icon={Icon.ArrowClockwise}
-                    onAction={() => void refreshRemoteProviders(true)}
-                  />
-                  <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
-                </ActionPanel>
-              }
+              actions={renderSnapshotActions(snapshot)}
             />
           ))}
         </List.Section>
