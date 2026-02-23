@@ -1,0 +1,257 @@
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
+import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
+import { parseDateLike, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
+
+const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+
+interface ClaudeCredentials {
+  accessToken: string;
+  rateLimitTier?: string;
+}
+
+interface ClaudeOAuthUsageWindow {
+  utilization?: unknown;
+  resets_at?: unknown;
+}
+
+interface ClaudeOAuthUsageResponse {
+  five_hour?: ClaudeOAuthUsageWindow;
+  seven_day?: ClaudeOAuthUsageWindow;
+  seven_day_sonnet?: ClaudeOAuthUsageWindow;
+  seven_day_opus?: ClaudeOAuthUsageWindow;
+  extra_usage?: {
+    is_enabled?: unknown;
+    used_credits?: unknown;
+    monthly_limit?: unknown;
+    currency?: unknown;
+  };
+}
+
+function splitConfigDirs(raw?: string): string[] {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function dedupePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const value of paths) {
+    const normalized = path.normalize(value);
+    if (seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    output.push(normalized);
+  }
+
+  return output;
+}
+
+function deepFindString(input: unknown, keys: string[]): string | undefined {
+  if (typeof input !== "object" || input === null) {
+    return undefined;
+  }
+
+  const queue: unknown[] = [input];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (typeof current !== "object" || current === null) {
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    for (const key of keys) {
+      const maybe = safeString(record[key]);
+      if (maybe) {
+        return maybe;
+      }
+    }
+
+    queue.push(...Object.values(record));
+  }
+
+  return undefined;
+}
+
+function resolveCredentialPaths(): string[] {
+  const home = os.homedir();
+  const envRoots = splitConfigDirs(process.env.CLAUDE_CONFIG_DIR);
+  const inferredFromEnv = envRoots.flatMap((root) => [
+    path.join(root, ".credentials.json"),
+    path.join(root, ".claude", ".credentials.json"),
+  ]);
+
+  return dedupePaths([
+    ...inferredFromEnv,
+    path.join(home, ".claude", ".credentials.json"),
+    path.join(home, ".config", "claude", ".credentials.json"),
+  ]);
+}
+
+async function readFirstCredentialsFile(): Promise<unknown> {
+  const candidates = resolveCredentialPaths();
+  for (const candidate of candidates) {
+    try {
+      const raw = await fs.readFile(candidate, "utf8");
+      return JSON.parse(raw);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("Claude credentials not found. Run `claude login` or provide a Claude OAuth access token.");
+}
+
+async function loadClaudeCredentials(manualToken?: string): Promise<ClaudeCredentials> {
+  const directToken = manualToken?.trim();
+  if (directToken) {
+    return {
+      accessToken: directToken.replace(/^Bearer\s+/i, ""),
+      rateLimitTier: undefined,
+    };
+  }
+
+  const parsed = await readFirstCredentialsFile();
+  const accessToken = deepFindString(parsed, ["accessToken", "access_token", "token"]);
+  if (!accessToken) {
+    throw new Error("Claude credentials found, but no OAuth access token was present.");
+  }
+
+  const rateLimitTier = deepFindString(parsed, ["rateLimitTier", "rate_limit_tier"]);
+  return {
+    accessToken,
+    rateLimitTier,
+  };
+}
+
+function toPlanLabel(rateLimitTier?: string): string {
+  const tier = rateLimitTier?.toLowerCase() ?? "";
+  if (tier.includes("max")) {
+    return "Max";
+  }
+  if (tier.includes("pro")) {
+    return "Pro";
+  }
+  if (tier.includes("team")) {
+    return "Team";
+  }
+  if (tier.includes("enterprise")) {
+    return "Enterprise";
+  }
+  return "OAuth";
+}
+
+function toQuotaFromWindow(
+  window: ClaudeOAuthUsageWindow | undefined,
+  label: string,
+  id: string,
+): QuotaItem | undefined {
+  const utilization = parseOptionalNumber(window?.utilization);
+  if (utilization === undefined) {
+    return undefined;
+  }
+
+  const remainingPercent = Math.max(0, Math.min(100, 100 - utilization));
+  const resetAt = parseDateLike(window?.resets_at);
+  return {
+    id,
+    label,
+    remainingPercent,
+    remainingDisplay: `${remainingPercent.toFixed(1).replace(/\.0$/, "")}% left`,
+    resetAt,
+    status: statusFromRemainingPercent(remainingPercent),
+  };
+}
+
+export function mapClaudeUsageToQuotas(payload: ClaudeOAuthUsageResponse): QuotaItem[] {
+  const quotas: QuotaItem[] = [];
+  const primary = toQuotaFromWindow(payload.five_hour, "5 Hour Limit", "claude-five-hour");
+  const weekly = toQuotaFromWindow(payload.seven_day, "Weekly Limit", "claude-weekly");
+  const sonnet =
+    toQuotaFromWindow(payload.seven_day_sonnet, "Sonnet Weekly", "claude-sonnet-weekly") ??
+    toQuotaFromWindow(payload.seven_day_opus, "Opus Weekly", "claude-opus-weekly");
+
+  if (primary) {
+    quotas.push(primary);
+  }
+  if (weekly) {
+    quotas.push(weekly);
+  }
+  if (sonnet) {
+    quotas.push(sonnet);
+  }
+
+  const extra = payload.extra_usage;
+  const enabled = extra?.is_enabled === true;
+  const usedCredits = parseOptionalNumber(extra?.used_credits);
+  const monthlyLimit = parseOptionalNumber(extra?.monthly_limit);
+
+  if (enabled && usedCredits !== undefined && monthlyLimit !== undefined && monthlyLimit > 0) {
+    const currency = safeString(extra?.currency) ?? "USD";
+    const usedMajor = usedCredits / 100;
+    const limitMajor = monthlyLimit / 100;
+    const remainingMajor = Math.max(0, limitMajor - usedMajor);
+    const remainingPercent = (remainingMajor / limitMajor) * 100;
+
+    quotas.push({
+      id: "claude-extra-usage",
+      label: "Extra Usage Budget",
+      remainingPercent,
+      remainingDisplay: `${currency} ${remainingMajor.toFixed(2)} left`,
+      status: statusFromRemainingPercent(remainingPercent),
+    });
+  }
+
+  return quotas;
+}
+
+export async function fetchClaudeSnapshot(manualAccessToken?: string): Promise<ProviderUsageSnapshot> {
+  const credentials = await loadClaudeCredentials(manualAccessToken);
+
+  const response = await fetch(CLAUDE_OAUTH_USAGE_URL, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${credentials.accessToken}`,
+      Accept: "application/json",
+      "anthropic-beta": "oauth-2025-04-20",
+      "User-Agent": "agent-usage-raycast",
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        "Claude OAuth token is invalid or missing required scope (`user:profile`). Re-run `claude login`.",
+      );
+    }
+    const body = await response.text();
+    throw new Error(`Claude OAuth usage API ${response.status}: ${body.slice(0, 220)}`);
+  }
+
+  const payload = (await response.json()) as ClaudeOAuthUsageResponse;
+  const quotas = mapClaudeUsageToQuotas(payload);
+  if (quotas.length === 0) {
+    throw new Error("Claude usage API returned no parseable usage windows.");
+  }
+
+  return {
+    provider: "claude",
+    planLabel: toPlanLabel(credentials.rateLimitTier),
+    fetchedAt: new Date().toISOString(),
+    quotas,
+    source: "api",
+  };
+}

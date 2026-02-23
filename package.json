@@ -1,0 +1,95 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "agent-usage",
+  "title": "Agent Usage",
+  "description": "Track Codex, Claude, and GitHub Copilot usage in one Raycast command.",
+  "icon": "extension-icon.png",
+  "author": "nedim_perva",
+  "platforms": [
+    "Windows",
+    "macOS"
+  ],
+  "categories": [
+    "Productivity",
+    "Developer Tools"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "agent-usage",
+      "title": "Agent Usage",
+      "subtitle": "Codex, Claude, Copilot",
+      "description": "View usage snapshots and remaining limits across providers.",
+      "mode": "view",
+      "preferences": [
+        {
+          "name": "codexAuthToken",
+          "type": "password",
+          "title": "Codex Auth Token (Optional)",
+          "description": "Optional Bearer token override. Leave empty to auto-read ~/.codex/auth.json.",
+          "required": false
+        },
+        {
+          "name": "claudeAccessToken",
+          "type": "password",
+          "title": "Claude OAuth Access Token (Optional)",
+          "description": "Optional OAuth token override. Leave empty to auto-read Claude credentials file.",
+          "required": false
+        },
+        {
+          "name": "copilotApiToken",
+          "type": "password",
+          "title": "Copilot API Token (Optional)",
+          "description": "Optional manual token. You can also use device login from the command actions.",
+          "required": false
+        },
+        {
+          "name": "codexUsageUrl",
+          "type": "textfield",
+          "title": "Codex Usage URL",
+          "description": "Usage page opened by the Codex action.",
+          "default": "https://chatgpt.com/",
+          "required": false
+        },
+        {
+          "name": "claudeUsageUrl",
+          "type": "textfield",
+          "title": "Claude Usage URL",
+          "description": "Usage page opened by the Claude action.",
+          "default": "https://claude.ai/settings/usage",
+          "required": false
+        },
+        {
+          "name": "copilotUsageUrl",
+          "type": "textfield",
+          "title": "Copilot Usage URL",
+          "description": "Usage page opened by the Copilot action.",
+          "default": "https://github.com/settings/copilot",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.104.3",
+    "@raycast/utils": "^2.2.2"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.1.1",
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}
