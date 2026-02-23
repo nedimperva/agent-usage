@@ -15,7 +15,7 @@ import {
 } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatRelativeTimestamp } from "./lib/date";
-import { quotaAccessories, statusIcon } from "./lib/format";
+import { quotaAccessories, quotaProgressIcon, statusIcon } from "./lib/format";
 import { loadDashboardState, mapSnapshotsByProvider, saveDashboardState } from "./lib/storage";
 import { ProviderId, ProviderUsageSnapshot } from "./models/usage";
 import { fetchClaudeSnapshot } from "./providers/claude";
@@ -496,7 +496,7 @@ export default function Command() {
           {snapshot.quotas.map((quota) => (
             <List.Item
               key={`${snapshot.provider}-${quota.id}`}
-              icon={statusIcon(quota.status)}
+              icon={quotaProgressIcon(quota)}
               title={quota.label}
               subtitle={quota.remainingDisplay}
               accessories={quotaAccessories(quota)}
