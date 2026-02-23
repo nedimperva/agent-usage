@@ -4,14 +4,11 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 
 ## Features
 
-- Unified dashboard for Codex, Claude, and Copilot.
+- Unified dashboard with one-row provider summaries for Codex, Claude, and Copilot.
+- Provider drilldown views with quota details, inline issues, and provider-scoped actions.
 - Progress rings based on real remaining percentage.
-- Alert-first section with warning (`<=25%`) and critical (`<=10%`) thresholds.
-- Alert messages include reset countdowns (`Xd Yh`) and last update time.
-- Optional reset date and trend badge display in provider rows.
 - Copilot device login flow inside the command.
-- Quick auth-repair actions from list items and alerts.
-- Codex manual import fallback when auto-fetch is unavailable.
+- Quick auth-repair actions from provider rows and detail views.
 
 ## Data sources
 
@@ -46,37 +43,6 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 3. Copilot
    - Recommended: `Start Copilot Device Login` then `Complete Copilot Device Login`
    - Optional: set `Copilot API Token` in extension preferences
-
-## Codex import fallback
-
-Use `Import Codex Usage` when Codex auto-fetch is unavailable.
-
-JSON example:
-
-```json
-{
-  "quotas": [
-    {
-      "label": "Weekly Limit",
-      "remainingPercent": 68,
-      "trendBadge": "+10%",
-      "resetAt": "2026-02-25T00:00:00Z"
-    },
-    {
-      "label": "5 Hour Limit",
-      "remainingPercent": 100,
-      "remainingDisplay": "4h left"
-    }
-  ]
-}
-```
-
-Plain text example:
-
-```text
-Weekly Limit: 68% left +10% reset Feb 25
-5 Hour Limit: 100% left 4h
-```
 
 ## Store publishing checklist
 

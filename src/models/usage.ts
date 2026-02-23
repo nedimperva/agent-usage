@@ -2,7 +2,7 @@ export type ProviderId = "codex" | "claude" | "copilot";
 
 export type QuotaStatus = "ok" | "warning" | "critical" | "unknown";
 
-export type SnapshotSource = "api" | "import" | "manual";
+export type SnapshotSource = "api" | "manual";
 
 export interface QuotaItem {
   id: string;

@@ -14,13 +14,21 @@ import {
   showToast,
 } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deriveSnapshotAlerts, summarizeAlerts } from "./lib/alerts";
+import { ProviderDetailView, PendingCopilotDeviceLogin } from "./components/provider-detail-view";
+import {
+  isUnavailableSnapshot,
+  PROVIDER_ORDER,
+  refreshAllProviders,
+  refreshSingleProvider,
+  SnapshotMap,
+  summarizeProviderSnapshot,
+} from "./lib/dashboard";
 import { formatRelativeTimestamp } from "./lib/date";
-import { quotaAccessories, quotaProgressIcon, statusIcon } from "./lib/format";
+import { statusIcon } from "./lib/format";
 import { loadDashboardState, mapSnapshotsByProvider, saveDashboardState } from "./lib/storage";
 import { ProviderId, ProviderUsageSnapshot } from "./models/usage";
 import { fetchClaudeSnapshot } from "./providers/claude";
-import { fetchCodexSnapshot, parseCodexImport } from "./providers/codex";
+import { fetchCodexSnapshot } from "./providers/codex";
 import { fetchCopilotSnapshot, pollCopilotDeviceToken, requestCopilotDeviceCode } from "./providers/copilot";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
@@ -35,14 +43,6 @@ interface Preferences {
   copilotUsageUrl?: string;
 }
 
-interface CodexImportFormValues {
-  payload: string;
-}
-
-interface CodexImportFormProps {
-  onImport: (payload: string) => Promise<void>;
-}
-
 interface CopilotTokenFormValues {
   token: string;
 }
@@ -50,17 +50,6 @@ interface CopilotTokenFormValues {
 interface CopilotTokenFormProps {
   onSave: (token: string) => Promise<void>;
 }
-
-interface PendingCopilotDeviceLogin {
-  deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  expiresIn: number;
-  interval: number;
-  createdAt: string;
-}
-
-const PROVIDER_ORDER: ProviderId[] = ["codex", "copilot", "claude"];
 
 const PROVIDER_TITLES: Record<ProviderId, string> = {
   codex: "Codex",
@@ -96,48 +85,6 @@ function providerUrl(provider: ProviderId, preferences: Preferences): string {
   return preferences.copilotUsageUrl?.trim() || "https://github.com/settings/copilot";
 }
 
-function sectionTitle(snapshot: ProviderUsageSnapshot): string {
-  const base = PROVIDER_TITLES[snapshot.provider];
-  return snapshot.planLabel ? `${base} (${snapshot.planLabel})` : base;
-}
-
-function CodexImportForm({ onImport }: CodexImportFormProps) {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  return (
-    <Form
-      isLoading={isSubmitting}
-      actions={
-        <ActionPanel>
-          <Action.SubmitForm
-            title="Import Usage"
-            icon={Icon.Upload}
-            onSubmit={async (values: CodexImportFormValues) => {
-              setIsSubmitting(true);
-              try {
-                await onImport(values.payload);
-                await popToRoot();
-              } finally {
-                setIsSubmitting(false);
-              }
-            }}
-          />
-        </ActionPanel>
-      }
-    >
-      <Form.Description
-        title="Codex Usage Import"
-        text="Fallback import: paste JSON or `Label: 68% left +10% reset Feb 25` lines."
-      />
-      <Form.TextArea
-        id="payload"
-        title="Usage Payload"
-        placeholder='{"quotas":[{"label":"Weekly Limit","remainingPercent":68}]}'
-      />
-    </Form>
-  );
-}
-
 function CopilotTokenForm({ onSave }: CopilotTokenFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -170,11 +117,12 @@ function CopilotTokenForm({ onSave }: CopilotTokenFormProps) {
 
 export default function Command() {
   const preferences = getPreferenceValues<Preferences>();
-  const [snapshots, setSnapshots] = useState<Partial<Record<ProviderId, ProviderUsageSnapshot>>>({});
+  const [snapshots, setSnapshots] = useState<SnapshotMap>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [refreshingProvider, setRefreshingProvider] = useState<ProviderId | undefined>();
   const [lastRefreshAt, setLastRefreshAt] = useState<string | undefined>();
-  const snapshotsRef = useRef<Partial<Record<ProviderId, ProviderUsageSnapshot>>>({});
+  const snapshotsRef = useRef<SnapshotMap>({});
   const copilotTokenRef = useRef<string | undefined>(undefined);
   const [copilotTokenState, setCopilotTokenState] = useState<string | undefined>();
   const [pendingCopilotLogin, setPendingCopilotLogin] = useState<PendingCopilotDeviceLogin | undefined>();
@@ -201,97 +149,129 @@ export default function Command() {
     setPendingCopilotLogin(undefined);
   }, []);
 
-  const persistSnapshots = useCallback(
-    async (next: Partial<Record<ProviderId, ProviderUsageSnapshot>>, refreshAt?: string) => {
-      const ordered = PROVIDER_ORDER.map((providerId) => next[providerId]).filter(
-        (snapshot): snapshot is ProviderUsageSnapshot => !!snapshot,
-      );
+  const persistSnapshots = useCallback(async (next: SnapshotMap, refreshAt?: string) => {
+    const ordered = PROVIDER_ORDER.map((providerId) => next[providerId]).filter(
+      (snapshot): snapshot is ProviderUsageSnapshot => !!snapshot,
+    );
 
-      await saveDashboardState({
-        snapshots: ordered,
-        lastRefreshAt: refreshAt,
-      });
-    },
-    [],
-  );
+    await saveDashboardState({
+      snapshots: ordered,
+      lastRefreshAt: refreshAt,
+    });
+  }, []);
 
   const resolveCopilotToken = useCallback((): string | undefined => {
     const preferenceToken = preferences.copilotApiToken?.trim();
     if (preferenceToken) {
       return preferenceToken;
     }
+
     return copilotTokenRef.current?.trim();
   }, [preferences.copilotApiToken]);
 
-  const refreshRemoteProviders = useCallback(
-    async (showSuccess = false) => {
-      setIsRefreshing(true);
-      try {
-        const next: Partial<Record<ProviderId, ProviderUsageSnapshot>> = { ...snapshotsRef.current };
-        const now = new Date().toISOString();
-
-        try {
-          next.codex = await fetchCodexSnapshot(preferences.codexAuthToken);
-        } catch (error) {
-          next.codex = buildFallbackSnapshot(
-            "codex",
-            error instanceof Error ? error.message : "Codex usage request failed.",
-          );
-        }
-
-        try {
-          next.claude = await fetchClaudeSnapshot(preferences.claudeAccessToken);
-        } catch (error) {
-          next.claude = buildFallbackSnapshot(
-            "claude",
-            error instanceof Error ? error.message : "Claude usage request failed.",
-          );
-        }
-
-        const copilotToken = resolveCopilotToken();
-        if (copilotToken) {
-          try {
-            next.copilot = await fetchCopilotSnapshot(copilotToken);
-          } catch (error) {
-            next.copilot = buildFallbackSnapshot(
-              "copilot",
-              error instanceof Error ? error.message : "Copilot usage request failed.",
-            );
-          }
-        } else {
-          const pending = pendingCopilotLogin;
-          const activePending = pending && !isPendingCopilotLoginExpired(pending);
-          next.copilot = buildFallbackSnapshot(
-            "copilot",
-            activePending
-              ? `Device code ${pending.userCode} pending. Complete login, then run Complete Copilot Device Login.`
-              : "No Copilot token configured. Start Copilot Device Login.",
-          );
-        }
-
-        setSnapshots(next);
-        snapshotsRef.current = next;
-        setLastRefreshAt(now);
-        await persistSnapshots(next, now);
-
-        if (showSuccess) {
-          await showToast({
-            title: "Usage Refreshed",
-            style: Toast.Style.Success,
-          });
-        }
-      } finally {
-        setIsRefreshing(false);
+  const fetchProviderSnapshot = useCallback(
+    async (provider: ProviderId): Promise<ProviderUsageSnapshot> => {
+      if (provider === "codex") {
+        return fetchCodexSnapshot(preferences.codexAuthToken);
       }
+
+      if (provider === "claude") {
+        return fetchClaudeSnapshot(preferences.claudeAccessToken);
+      }
+
+      const copilotToken = resolveCopilotToken();
+      if (!copilotToken) {
+        const pending = pendingCopilotLogin;
+        if (pending && !isPendingCopilotLoginExpired(pending)) {
+          throw new Error(
+            `Device code ${pending.userCode} pending. Complete login, then run Complete Copilot Device Login.`,
+          );
+        }
+
+        throw new Error("No Copilot token configured. Start Copilot Device Login.");
+      }
+
+      return fetchCopilotSnapshot(copilotToken);
     },
     [
       isPendingCopilotLoginExpired,
       pendingCopilotLogin,
-      persistSnapshots,
       preferences.claudeAccessToken,
       preferences.codexAuthToken,
       resolveCopilotToken,
     ],
+  );
+
+  const fallbackSnapshotForProvider = useCallback((provider: ProviderId, error: unknown): ProviderUsageSnapshot => {
+    const reason = error instanceof Error ? error.message : `${PROVIDER_TITLES[provider]} usage request failed.`;
+    return buildFallbackSnapshot(provider, reason);
+  }, []);
+
+  const refreshProvider = useCallback(
+    async (provider: ProviderId, showSuccess = false) => {
+      setRefreshingProvider(provider);
+
+      try {
+        const result = await refreshSingleProvider(
+          snapshotsRef.current,
+          provider,
+          fetchProviderSnapshot,
+          fallbackSnapshotForProvider,
+        );
+
+        setSnapshots(result.snapshots);
+        snapshotsRef.current = result.snapshots;
+        setLastRefreshAt(result.refreshedAt);
+        await persistSnapshots(result.snapshots, result.refreshedAt);
+
+        if (showSuccess) {
+          await showToast({
+            title: result.failed
+              ? `${PROVIDER_TITLES[provider]} refresh failed`
+              : `${PROVIDER_TITLES[provider]} refreshed`,
+            message: result.failed ? "Showing fallback status." : undefined,
+            style: result.failed ? Toast.Style.Failure : Toast.Style.Success,
+          });
+        }
+      } finally {
+        setRefreshingProvider(undefined);
+      }
+    },
+    [fallbackSnapshotForProvider, fetchProviderSnapshot, persistSnapshots],
+  );
+
+  const refreshAllRemoteProviders = useCallback(
+    async (showSuccess = false) => {
+      setIsRefreshingAll(true);
+
+      try {
+        const result = await refreshAllProviders(
+          snapshotsRef.current,
+          fetchProviderSnapshot,
+          fallbackSnapshotForProvider,
+        );
+
+        setSnapshots(result.snapshots);
+        snapshotsRef.current = result.snapshots;
+        setLastRefreshAt(result.refreshedAt);
+        await persistSnapshots(result.snapshots, result.refreshedAt);
+
+        if (showSuccess) {
+          const failedCount = result.failedProviders.length;
+          await showToast({
+            title: failedCount > 0 ? "Refresh complete with issues" : "Usage refreshed",
+            message:
+              failedCount > 0
+                ? `Failed providers: ${result.failedProviders.map((provider) => PROVIDER_TITLES[provider]).join(", ")}`
+                : undefined,
+            style: failedCount > 0 ? Toast.Style.Failure : Toast.Style.Success,
+          });
+        }
+      } finally {
+        setIsRefreshingAll(false);
+      }
+    },
+    [fallbackSnapshotForProvider, fetchProviderSnapshot, persistSnapshots],
   );
 
   const saveCopilotToken = useCallback(
@@ -308,9 +288,9 @@ export default function Command() {
         title: "Copilot token saved",
         style: Toast.Style.Success,
       });
-      await refreshRemoteProviders(false);
+      await refreshProvider("copilot", false);
     },
-    [refreshRemoteProviders],
+    [refreshProvider],
   );
 
   const clearStoredCopilotToken = useCallback(async () => {
@@ -321,8 +301,8 @@ export default function Command() {
       title: "Stored Copilot token removed",
       style: Toast.Style.Success,
     });
-    await refreshRemoteProviders(false);
-  }, [refreshRemoteProviders]);
+    await refreshProvider("copilot", false);
+  }, [refreshProvider]);
 
   const startCopilotDeviceFlow = useCallback(async () => {
     const startingToast = await showToast({
@@ -342,6 +322,7 @@ export default function Command() {
       setPendingCopilotLogin(pending);
       await Clipboard.copy(pending.userCode);
       await open(pending.verificationUri);
+      await refreshProvider("copilot", false);
 
       startingToast.style = Toast.Style.Success;
       startingToast.title = "Copilot code ready";
@@ -351,7 +332,7 @@ export default function Command() {
       startingToast.title = "Copilot login failed";
       startingToast.message = error instanceof Error ? error.message : "Unknown device flow error.";
     }
-  }, []);
+  }, [refreshProvider]);
 
   const completeCopilotDeviceFlow = useCallback(async () => {
     const pending = pendingCopilotLogin;
@@ -371,6 +352,7 @@ export default function Command() {
         message: "Start Copilot Device Login again.",
         style: Toast.Style.Failure,
       });
+      await refreshProvider("copilot", false);
       return;
     }
 
@@ -389,37 +371,13 @@ export default function Command() {
       waitingToast.style = Toast.Style.Success;
       waitingToast.title = "Copilot connected";
       waitingToast.message = "Token saved and ready.";
-      await refreshRemoteProviders(false);
+      await refreshProvider("copilot", false);
     } catch (error) {
       waitingToast.style = Toast.Style.Failure;
       waitingToast.title = "Copilot login failed";
       waitingToast.message = error instanceof Error ? error.message : "Unknown device flow error.";
     }
-  }, [clearPendingCopilotLogin, isPendingCopilotLoginExpired, pendingCopilotLogin, refreshRemoteProviders]);
-
-  const importCodexPayload = useCallback(
-    async (payload: string) => {
-      try {
-        const codexSnapshot = parseCodexImport(payload);
-        const next = { ...snapshotsRef.current, codex: codexSnapshot };
-        setSnapshots(next);
-        snapshotsRef.current = next;
-        await persistSnapshots(next, lastRefreshAt);
-        await showToast({
-          title: "Codex usage imported",
-          style: Toast.Style.Success,
-        });
-      } catch (error) {
-        await showToast({
-          title: "Codex import failed",
-          message: error instanceof Error ? error.message : "Unknown import error.",
-          style: Toast.Style.Failure,
-        });
-        throw error;
-      }
-    },
-    [lastRefreshAt, persistSnapshots],
-  );
+  }, [clearPendingCopilotLogin, isPendingCopilotLoginExpired, pendingCopilotLogin, refreshProvider]);
 
   useEffect(() => {
     async function hydrate() {
@@ -454,11 +412,11 @@ export default function Command() {
       }
 
       setIsLoading(false);
-      await refreshRemoteProviders(false);
+      await refreshAllRemoteProviders(false);
     }
 
     void hydrate();
-  }, [isPendingCopilotLoginExpired, refreshRemoteProviders]);
+  }, [isPendingCopilotLoginExpired, refreshAllRemoteProviders]);
 
   const renderedSnapshots = useMemo(() => {
     return PROVIDER_ORDER.map((providerId) => {
@@ -468,7 +426,7 @@ export default function Command() {
       }
 
       if (providerId === "codex") {
-        return buildFallbackSnapshot("codex", "Run `codex login` then refresh. Import fallback is also available.");
+        return buildFallbackSnapshot("codex", "Run `codex login` then refresh.");
       }
 
       if (providerId === "claude") {
@@ -478,6 +436,7 @@ export default function Command() {
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
   }, [snapshots]);
+
   const hasStoredCopilotToken = !!copilotTokenState?.trim();
 
   const repairProviderAuth = useCallback(
@@ -515,15 +474,42 @@ export default function Command() {
     [completeCopilotDeviceFlow, isPendingCopilotLoginExpired, pendingCopilotLogin, startCopilotDeviceFlow],
   );
 
-  const renderSnapshotActions = useCallback(
+  const pendingCopilotExpiresAt =
+    pendingCopilotLogin && !isPendingCopilotLoginExpired(pendingCopilotLogin)
+      ? new Date(Date.parse(pendingCopilotLogin.createdAt) + pendingCopilotLogin.expiresIn * 1000).toISOString()
+      : undefined;
+
+  const providerIssues = useMemo(() => {
+    const issues: Partial<Record<ProviderId, string[]>> = {};
+
+    for (const snapshot of renderedSnapshots) {
+      const next: string[] = [];
+      if (isUnavailableSnapshot(snapshot)) {
+        const unavailableReason = snapshot.quotas.find((quota) => quota.label === "Unavailable")?.remainingDisplay;
+        if (unavailableReason) {
+          next.push(unavailableReason);
+        }
+      }
+
+      if (snapshot.errors?.length) {
+        next.push(...snapshot.errors);
+      }
+
+      issues[snapshot.provider] = next;
+    }
+
+    return issues;
+  }, [renderedSnapshots]);
+
+  const renderProviderActions = useCallback(
     (snapshot: ProviderUsageSnapshot) => (
       <ActionPanel>
-        <Action title="Refresh All" icon={Icon.ArrowClockwise} onAction={() => void refreshRemoteProviders(true)} />
-        <Action.Push
-          title="Import Codex Usage"
-          icon={Icon.Upload}
-          target={<CodexImportForm onImport={importCodexPayload} />}
+        <Action
+          title={`Refresh ${PROVIDER_TITLES[snapshot.provider]}`}
+          icon={Icon.ArrowClockwise}
+          onAction={() => void refreshProvider(snapshot.provider, true)}
         />
+        <Action title="Refresh All" icon={Icon.RotateClockwise} onAction={() => void refreshAllRemoteProviders(true)} />
         {snapshot.provider === "copilot" && (
           <Action title="Start Copilot Device Login" icon={Icon.Link} onAction={() => void startCopilotDeviceFlow()} />
         )}
@@ -592,114 +578,74 @@ export default function Command() {
       clearStoredCopilotToken,
       completeCopilotDeviceFlow,
       hasStoredCopilotToken,
-      importCodexPayload,
       pendingCopilotLogin,
       preferences,
-      refreshRemoteProviders,
+      refreshAllRemoteProviders,
+      refreshProvider,
       repairProviderAuth,
       saveCopilotToken,
       startCopilotDeviceFlow,
     ],
   );
 
-  const alerts = useMemo(() => deriveSnapshotAlerts(renderedSnapshots), [renderedSnapshots]);
-  const alertSummary = useMemo(() => summarizeAlerts(alerts), [alerts]);
-  const snapshotsByProvider = useMemo(() => mapSnapshotsByProvider(renderedSnapshots), [renderedSnapshots]);
+  const renderProviderDetail = useCallback(
+    (snapshot: ProviderUsageSnapshot) => (
+      <ProviderDetailView
+        snapshot={snapshot}
+        issues={providerIssues[snapshot.provider] ?? []}
+        isRefreshing={isRefreshingAll || refreshingProvider === snapshot.provider}
+        pendingCopilotLogin={snapshot.provider === "copilot" ? pendingCopilotLogin : undefined}
+        pendingCopilotExpiresAt={snapshot.provider === "copilot" ? pendingCopilotExpiresAt : undefined}
+        renderActions={renderProviderActions}
+      />
+    ),
+    [
+      isRefreshingAll,
+      pendingCopilotExpiresAt,
+      pendingCopilotLogin,
+      providerIssues,
+      refreshingProvider,
+      renderProviderActions,
+    ],
+  );
 
-  const isBusy = isLoading || isRefreshing;
-  const pendingCopilotExpiresAt =
-    pendingCopilotLogin && !isPendingCopilotLoginExpired(pendingCopilotLogin)
-      ? new Date(Date.parse(pendingCopilotLogin.createdAt) + pendingCopilotLogin.expiresIn * 1000).toISOString()
-      : undefined;
+  const isBusy = isLoading || isRefreshingAll;
 
   return (
-    <List isLoading={isBusy} searchBarPlaceholder="Search usage limits...">
-      <List.Section
-        title="Alerts"
-        subtitle={
-          alerts.length > 0 ? `${alertSummary.critical} critical, ${alertSummary.warning} warning` : "No active alerts"
-        }
-      >
-        {alerts.length === 0 ? (
-          <List.Item
-            icon={statusIcon("ok")}
-            title="All quotas healthy"
-            subtitle="No warning or critical usage thresholds are active."
-            actions={
-              <ActionPanel>
-                <Action
-                  title="Refresh All"
-                  icon={Icon.ArrowClockwise}
-                  onAction={() => void refreshRemoteProviders(true)}
-                />
-              </ActionPanel>
-            }
-          />
-        ) : (
-          alerts.map((alert) => {
-            const snapshot = snapshotsByProvider[alert.provider];
+    <List isLoading={isBusy} searchBarPlaceholder="Search providers...">
+      <List.Section title="Providers" subtitle={`${renderedSnapshots.length} providers`}>
+        {renderedSnapshots.map((snapshot) => {
+          const summary = summarizeProviderSnapshot(snapshot);
 
-            return (
-              <List.Item
-                key={alert.id}
-                icon={statusIcon(alert.severity)}
-                title={`${PROVIDER_TITLES[alert.provider]}: ${alert.label}`}
-                subtitle={`${alert.message} ${alert.recommendedAction}`}
-                actions={
-                  snapshot ? (
-                    renderSnapshotActions(snapshot)
-                  ) : (
-                    <ActionPanel>
-                      <Action
-                        title="Refresh All"
-                        icon={Icon.ArrowClockwise}
-                        onAction={() => void refreshRemoteProviders(true)}
-                      />
-                      <Action
-                        title={`Repair ${PROVIDER_TITLES[alert.provider]} Auth`}
-                        icon={Icon.Gear}
-                        onAction={() => void repairProviderAuth(alert.provider)}
-                      />
-                      <Action.OpenInBrowser
-                        title={`Open ${PROVIDER_TITLES[alert.provider]} Usage Page`}
-                        icon={Icon.Globe}
-                        url={providerUrl(alert.provider, preferences)}
-                      />
-                    </ActionPanel>
-                  )
-                }
-              />
-            );
-          })
-        )}
+          return (
+            <List.Item
+              key={snapshot.provider}
+              icon={statusIcon(summary.status)}
+              title={summary.title}
+              subtitle={summary.subtitle}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title={`Open ${PROVIDER_TITLES[snapshot.provider]} Details`}
+                    icon={Icon.List}
+                    target={renderProviderDetail(snapshot)}
+                  />
+                  <Action
+                    title={`Refresh ${PROVIDER_TITLES[snapshot.provider]}`}
+                    icon={Icon.ArrowClockwise}
+                    onAction={() => void refreshProvider(snapshot.provider, true)}
+                  />
+                  <Action
+                    title="Refresh All"
+                    icon={Icon.RotateClockwise}
+                    onAction={() => void refreshAllRemoteProviders(true)}
+                  />
+                </ActionPanel>
+              }
+            />
+          );
+        })}
       </List.Section>
-      {renderedSnapshots.map((snapshot) => (
-        <List.Section
-          key={snapshot.provider}
-          title={sectionTitle(snapshot)}
-          subtitle={`Updated ${formatRelativeTimestamp(snapshot.fetchedAt)}`}
-        >
-          {snapshot.quotas.map((quota) => (
-            <List.Item
-              key={`${snapshot.provider}-${quota.id}`}
-              icon={quotaProgressIcon(quota)}
-              title={quota.label}
-              subtitle={quota.remainingDisplay}
-              accessories={quotaAccessories(quota)}
-              actions={renderSnapshotActions(snapshot)}
-            />
-          ))}
-          {snapshot.errors?.map((error, index) => (
-            <List.Item
-              key={`${snapshot.provider}-error-${index}`}
-              icon={statusIcon("critical")}
-              title="Provider Warning"
-              subtitle={error}
-              actions={renderSnapshotActions(snapshot)}
-            />
-          ))}
-        </List.Section>
-      ))}
       <List.Section
         title="Status"
         subtitle={lastRefreshAt ? `Last full refresh ${formatRelativeTimestamp(lastRefreshAt)}` : "No refresh yet"}
@@ -707,103 +653,24 @@ export default function Command() {
         <List.Item
           icon={Icon.Clock}
           title="Dashboard"
-          subtitle={isRefreshing ? "Refreshing provider data..." : "Ready"}
+          subtitle={
+            isRefreshingAll
+              ? "Refreshing all providers..."
+              : refreshingProvider
+                ? `Refreshing ${PROVIDER_TITLES[refreshingProvider]}...`
+                : "Ready"
+          }
           actions={
             <ActionPanel>
               <Action
                 title="Refresh All"
                 icon={Icon.ArrowClockwise}
-                onAction={() => void refreshRemoteProviders(true)}
+                onAction={() => void refreshAllRemoteProviders(true)}
               />
-              <Action.Push
-                title="Import Codex Usage"
-                icon={Icon.Upload}
-                target={<CodexImportForm onImport={importCodexPayload} />}
-              />
-              <Action
-                title="Start Copilot Device Login"
-                icon={Icon.Link}
-                onAction={() => void startCopilotDeviceFlow()}
-              />
-              {pendingCopilotLogin && (
-                <Action
-                  title="Complete Copilot Device Login"
-                  icon={Icon.CheckCircle}
-                  onAction={() => void completeCopilotDeviceFlow()}
-                />
-              )}
-              {pendingCopilotLogin && (
-                <Action
-                  title="Copy Copilot Device Code"
-                  icon={Icon.Clipboard}
-                  onAction={() => void Clipboard.copy(pendingCopilotLogin.userCode)}
-                />
-              )}
-              {pendingCopilotLogin && (
-                <Action.OpenInBrowser
-                  title="Open GitHub Device Verification"
-                  icon={Icon.Globe}
-                  url={pendingCopilotLogin.verificationUri}
-                />
-              )}
-              {pendingCopilotLogin && (
-                <Action
-                  title="Cancel Copilot Device Login"
-                  icon={Icon.Trash}
-                  onAction={() => void clearPendingCopilotLogin()}
-                />
-              )}
-              <Action.Push
-                title="Set Copilot Token"
-                icon={Icon.Key}
-                target={<CopilotTokenForm onSave={saveCopilotToken} />}
-              />
-              {hasStoredCopilotToken && (
-                <Action
-                  title="Clear Stored Copilot Token"
-                  icon={Icon.XMarkCircle}
-                  onAction={() => void clearStoredCopilotToken()}
-                />
-              )}
+              <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
             </ActionPanel>
           }
         />
-        {pendingCopilotLogin && (
-          <List.Item
-            icon={Icon.Key}
-            title={`Copilot Device Code: ${pendingCopilotLogin.userCode}`}
-            subtitle={
-              pendingCopilotExpiresAt
-                ? `Expires ${formatRelativeTimestamp(pendingCopilotExpiresAt)}. Paste this code on GitHub device page.`
-                : "Code expired. Start Copilot Device Login again."
-            }
-            accessories={[{ text: pendingCopilotExpiresAt ? "Pending" : "Expired" }]}
-            actions={
-              <ActionPanel>
-                <Action
-                  title="Complete Copilot Device Login"
-                  icon={Icon.CheckCircle}
-                  onAction={() => void completeCopilotDeviceFlow()}
-                />
-                <Action
-                  title="Copy Copilot Device Code"
-                  icon={Icon.Clipboard}
-                  onAction={() => void Clipboard.copy(pendingCopilotLogin.userCode)}
-                />
-                <Action.OpenInBrowser
-                  title="Open GitHub Device Verification"
-                  icon={Icon.Globe}
-                  url={pendingCopilotLogin.verificationUri}
-                />
-                <Action
-                  title="Cancel Copilot Device Login"
-                  icon={Icon.Trash}
-                  onAction={() => void clearPendingCopilotLogin()}
-                />
-              </ActionPanel>
-            }
-          />
-        )}
       </List.Section>
     </List>
   );
