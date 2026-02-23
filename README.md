@@ -1,99 +1,51 @@
 # Agent Usage (Raycast)
 
-Track Codex, Claude, and GitHub Copilot usage in one Raycast command with a design focused on remaining quota.
+Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Raycast command.
 
-## Tracking sources
+## Features
 
-This extension uses these data paths:
+- Unified dashboard for Codex, Claude, and Copilot.
+- Progress rings based on real remaining percentage.
+- Optional reset date and trend badge display.
+- Copilot device login flow inside the command.
+- Codex manual import fallback when auto-fetch is unavailable.
 
-1. Codex:
-   - Auto: local Codex auth file + ChatGPT usage endpoint (`/backend-api/wham/usage`)
-   - Fallback: manual import (`Import Codex Usage`)
-2. Claude:
-   - Auto: Claude OAuth usage endpoint (`https://api.anthropic.com/api/oauth/usage`) using local Claude credentials file
-   - Optional override: manual Claude OAuth token in extension preferences
-3. Copilot:
-   - Auto: GitHub Copilot internal usage endpoint (`https://api.github.com/copilot_internal/user`)
-   - Auth options:
-     - Device flow from command actions (`Start Copilot Device Login` -> `Complete Copilot Device Login`)
-     - Manual token in extension preferences or command form
+## Data sources
 
-## UI behavior
-
-- Single dashboard command: `Agent Usage`
-- Provider sections:
-  - `Codex`
-  - `GitHub Copilot`
-  - `Claude`
-- Rows show:
-  - status dot
-  - quota label
-  - remaining text
-  - reset/trend accessories when available
+- Codex: ChatGPT usage endpoint (`/backend-api/wham/usage`) with your existing Codex login session.
+- Claude: OAuth usage endpoint (`https://api.anthropic.com/api/oauth/usage`) with your existing Claude login session.
+- Copilot: GitHub Copilot endpoint (`https://api.github.com/copilot_internal/user`) with device flow or token auth.
 
 ## Requirements
 
-1. Raycast (Windows or macOS)
-2. Node.js 20+
-3. npm
+1. Raycast for Windows or macOS
+2. Node.js 20+ and npm (development only)
+3. Account access for the providers you want to track
 
-Provider-specific:
+## Development setup
 
-1. Codex CLI logged in (`codex login`) for automatic Codex tracking
-2. Claude CLI logged in (`claude login`) for automatic Claude tracking
-3. GitHub account for Copilot device flow or a manual Copilot token
+1. Install dependencies: `npm install`
+2. Validate: `npm run lint`
+3. Validate types: `npm run typecheck`
+4. Run tests: `npm test`
+5. Start extension: `npm run dev`
+6. Open command: `Agent Usage`
 
-## Local development setup
+## Authentication options
 
-1. Open terminal at this folder:
-   - `D:\GitHub\agent-usage`
-2. Install dependencies:
-   - `npm install`
-3. Validate:
-   - `npm run lint`
-   - `npm run typecheck`
-   - `npm test`
-4. Run development mode:
-   - `npm run dev`
-5. Open Raycast command:
-   - `Agent Usage`
+1. Codex
+   - Automatic: use your existing `codex login` session
+   - Optional: set `Codex Auth Token` in extension preferences
+2. Claude
+   - Automatic: use your existing `claude login` session
+   - Optional: set `Claude OAuth Access Token` in extension preferences
+3. Copilot
+   - Recommended: `Start Copilot Device Login` then `Complete Copilot Device Login`
+   - Optional: set `Copilot API Token` in extension preferences
 
-## Extension preferences
+## Codex import fallback
 
-Open extension preferences and set optional overrides:
-
-1. `Codex Auth Token (Optional)`
-   - If empty, extension reads `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`)
-2. `Claude OAuth Access Token (Optional)`
-   - If empty, extension reads Claude credentials file automatically
-3. `Copilot API Token (Optional)`
-   - If empty, use device login action or token form in command
-4. Optional provider URLs:
-   - `Codex Usage URL`
-   - `Claude Usage URL`
-   - `Copilot Usage URL`
-
-## Copilot login options
-
-### Option A: Device login (recommended)
-
-1. Open `Agent Usage`
-2. Run action: `Start Copilot Device Login`
-3. Browser opens GitHub verification page
-4. Paste the shown/copied device code and approve
-5. Back in Raycast run: `Complete Copilot Device Login`
-6. Token is saved to extension local storage
-
-### Option B: Manual token
-
-1. Run action: `Set Copilot Token`
-2. Paste token and save
-
-You can clear saved token with `Clear Stored Copilot Token`.
-
-## Codex import fallback format
-
-Use `Import Codex Usage` when API auto-fetch is unavailable.
+Use `Import Codex Usage` when Codex auto-fetch is unavailable.
 
 JSON example:
 
@@ -122,55 +74,25 @@ Weekly Limit: 68% left +10% reset Feb 25
 5 Hour Limit: 100% left 4h
 ```
 
-## Command actions
+## Store publishing checklist
 
-- `Refresh All`
-- `Import Codex Usage`
-- `Start Copilot Device Login`
-- `Complete Copilot Device Login`
-- `Copy Copilot Device Code`
-- `Set Copilot Token`
-- `Clear Stored Copilot Token`
-- `Open <Provider> Usage Page`
-- `Copy <Provider> Raw Snapshot`
-- `Open Extension Preferences`
+1. Run checks: `npm run lint && npm run typecheck && npm test && npm run build`
+2. Capture screenshots: `npx @raycast/api@latest capture`
+3. Publish: `npm run publish`
+
+Raycast stores captured screenshots and store metadata in a top-level `metadata/` folder.
 
 ## Troubleshooting
 
-### Raycast shows "Something went wrong"
-
-1. In this folder run:
+1. If the command shows "Something went wrong", run:
    - `npm install`
    - `npm run lint`
    - `npm run typecheck`
-2. Restart Raycast
-3. Run `npm run dev` again
-4. Open `Agent Usage`
-
-### Codex is unavailable
-
-1. Run `codex login`
-2. Confirm auth file exists:
-   - `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`)
-3. Refresh dashboard
-4. If still failing, use `Import Codex Usage` fallback
-
-### Claude is unavailable
-
-1. Run `claude login`
-2. Confirm credentials file exists:
-   - `~/.claude/.credentials.json` (or path from `CLAUDE_CONFIG_DIR`)
-3. Refresh dashboard
-4. If you still get `401/403`, set a fresh OAuth token in preferences
-
-### Copilot is unavailable
-
-1. Use `Start Copilot Device Login`, then `Complete Copilot Device Login`
-2. If device flow fails, use `Set Copilot Token`
-3. Refresh dashboard
+   - `npm run dev`
+2. If Codex or Claude is unavailable, refresh login with `codex login` or `claude login`, then refresh the dashboard.
+3. If Copilot is unavailable, use device login again or set a fresh token.
 
 ## Known limitations
 
-- Provider endpoints can change; parser updates may be needed.
-- Some providers do not expose reset timestamps for all quota windows.
-- This extension is designed for private/local use first.
+- Provider endpoints can change.
+- Some providers do not expose reset timestamps for every quota.

@@ -2,9 +2,17 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "agent-usage",
   "title": "Agent Usage",
-  "description": "Track Codex, Claude, and GitHub Copilot usage in one Raycast command.",
+  "description": "Track Codex, Claude, and GitHub Copilot usage limits and resets in Raycast.",
   "icon": "extension-icon.png",
   "author": "nedim_perva",
+  "keywords": [
+    "usage",
+    "quota",
+    "limits",
+    "codex",
+    "claude",
+    "copilot"
+  ],
   "platforms": [
     "Windows",
     "macOS"
@@ -18,7 +26,6 @@
     {
       "name": "agent-usage",
       "title": "Agent Usage",
-      "subtitle": "Codex, Claude, Copilot",
       "description": "View usage snapshots and remaining limits across providers.",
       "mode": "view",
       "preferences": [
@@ -48,7 +55,7 @@
           "type": "textfield",
           "title": "Codex Usage URL",
           "description": "Usage page opened by the Codex action.",
-          "default": "https://chatgpt.com/",
+          "default": "https://chatgpt.com/codex/settings/usage",
           "required": false
         },
         {
@@ -71,7 +78,7 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.104.3",
+    "@raycast/api": "^1.104.6",
     "@raycast/utils": "^2.2.2"
   },
   "devDependencies": {
