@@ -390,10 +390,9 @@ export async function fetchGeminiSnapshot(manualAccessToken?: string): Promise<P
 
   const planLabel = mapGeminiTierToPlanLabel(codeAssist.tierId, claims.hostedDomain);
   const displayLabel = claims.email ? `${planLabel} (${claims.email})` : planLabel;
-  const highlights = [
-    projectId ? `Project: ${projectId}` : undefined,
-    codeAssist.tierId ? `Tier: ${codeAssist.tierId}` : undefined,
-  ].filter((entry): entry is string => !!entry);
+  const highlights = [codeAssist.tierId ? `Tier: ${codeAssist.tierId}` : undefined].filter(
+    (entry): entry is string => !!entry,
+  );
 
   return {
     provider: "gemini",

@@ -148,11 +148,23 @@ function formatDaysRemaining(targetIso?: string): string {
   return `${deltaDays} days`;
 }
 
-function truncateForHighlight(value: string, maxLength = 80): string {
-  if (value.length <= maxLength) {
-    return value;
+function extractPercentFromUsageMessage(value?: string): string {
+  if (!value) {
+    return "n/a";
   }
-  return `${value.slice(0, maxLength - 3)}...`;
+
+  const match = value.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match) {
+    return "n/a";
+  }
+
+  const numeric = Number(match[1]);
+  if (!Number.isFinite(numeric)) {
+    return "n/a";
+  }
+
+  const rounded = Math.round(numeric * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded.toFixed(0)}%` : `${rounded.toFixed(1)}%`;
 }
 
 function formatBillingDate(value?: string): string {
@@ -246,9 +258,9 @@ export function mapCursorUsageToQuotas(
   const teamOnDemandUsage =
     summary.teamUsage?.onDemand ?? summary.teamUsage?.on_demand ?? summary.team_usage?.on_demand;
 
-  const included = buildMoneyQuota("cursor-plan", "Included Plan", individualPlan, resetAt);
-  const onDemand = buildMoneyQuota("cursor-on-demand", "On-Demand Budget", individualOnDemand, resetAt);
-  const teamOnDemand = buildMoneyQuota("cursor-team-on-demand", "Team On-Demand", teamOnDemandUsage, resetAt);
+  const included = buildMoneyQuota("cursor-plan", "Included", individualPlan, resetAt);
+  const onDemand = buildMoneyQuota("cursor-on-demand", "Extra", individualOnDemand, resetAt);
+  const teamOnDemand = buildMoneyQuota("cursor-team-on-demand", "Team Extra", teamOnDemandUsage, resetAt);
 
   if (included) {
     quotas.push(included);
@@ -364,13 +376,11 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
   const namedMessage = safeString(
     summary.namedModelSelectedDisplayMessage ?? summary.named_model_selected_display_message,
   );
+  const autoPercent = extractPercentFromUsageMessage(autoMessage);
+  const namedPercent = extractPercentFromUsageMessage(namedMessage);
   const limitType = safeString(summary.limitType ?? summary.limit_type);
   const isUnlimited = summary.isUnlimited === true || summary.is_unlimited === true;
-  const highlights = [
-    billingStartDisplay && billingEndDisplay ? `Cycle: ${billingStartDisplay} -> ${billingEndDisplay}` : undefined,
-    autoMessage ? `Auto: ${truncateForHighlight(autoMessage, 72)}` : undefined,
-    namedMessage ? `Named: ${truncateForHighlight(namedMessage, 72)}` : undefined,
-  ].filter((entry): entry is string => !!entry);
+  const highlights = [`Auto: ${autoPercent}`, `Named: ${namedPercent}`].filter((entry): entry is string => !!entry);
 
   return {
     provider: "cursor",

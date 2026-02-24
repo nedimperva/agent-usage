@@ -95,35 +95,40 @@ describe("summarizeProviderSnapshot", () => {
     expect(summary.subtitle).toContain("+1 more");
   });
 
-  it("places provider highlights ahead of quota summary", () => {
+  it("keeps cursor quota summary before highlight details", () => {
     const summary = summarizeProviderSnapshot(
       snapshot("cursor", {
-        highlights: ["Cycle: Feb 1, 2026 -> Mar 1, 2026", "Auto: Enabled", "Named: Enabled"],
-        quotas: [{ id: "plan", label: "Included Plan", remainingPercent: 60, remainingDisplay: "60% left", status: "ok" }],
+        highlights: ["Auto: 62%", "Named: 38%"],
+        quotas: [{ id: "plan", label: "Included", remainingPercent: 60, remainingDisplay: "60% left", status: "ok" }],
       }),
       new Date("2026-02-23T12:00:00Z"),
     );
 
-    expect(summary.subtitle).toContain("Cycle: Feb 1, 2026 -> Mar 1, 2026");
-    expect(summary.subtitle).toContain("Auto: Enabled");
-    expect(summary.subtitle).toContain("Named: Enabled");
-    expect(summary.subtitle).toContain("Included Plan: 60%");
+    const usageIndex = summary.subtitle.indexOf("Included: 60%");
+    const autoIndex = summary.subtitle.indexOf("Auto: 62%");
+    const namedIndex = summary.subtitle.indexOf("Named: 38%");
+    expect(usageIndex).toBeGreaterThanOrEqual(0);
+    expect(autoIndex).toBeGreaterThanOrEqual(0);
+    expect(namedIndex).toBeGreaterThanOrEqual(0);
+    expect(usageIndex).toBeLessThan(autoIndex);
+    expect(autoIndex).toBeLessThan(namedIndex);
   });
 
-  it("keeps gemini quota summary before project highlights", () => {
+  it("keeps gemini quota summary before tier highlights", () => {
     const summary = summarizeProviderSnapshot(
       snapshot("gemini", {
-        highlights: ["Project: managed-project-123", "Tier: free-tier"],
+        highlights: ["Tier: free-tier"],
         quotas: [{ id: "gemini-pro", label: "Pro Models", remainingPercent: 48, remainingDisplay: "48% left", status: "ok" }],
       }),
       new Date("2026-02-23T12:00:00Z"),
     );
 
     const proIndex = summary.subtitle.indexOf("Pro Models: 48%");
-    const projectIndex = summary.subtitle.indexOf("Project: managed-project-123");
+    const tierIndex = summary.subtitle.indexOf("Tier: free-tier");
     expect(proIndex).toBeGreaterThanOrEqual(0);
-    expect(projectIndex).toBeGreaterThanOrEqual(0);
-    expect(proIndex).toBeLessThan(projectIndex);
+    expect(tierIndex).toBeGreaterThanOrEqual(0);
+    expect(proIndex).toBeLessThan(tierIndex);
+    expect(summary.subtitle).not.toContain("Project:");
   });
 });
 

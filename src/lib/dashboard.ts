@@ -120,7 +120,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
     provider: snapshot.provider,
     title,
     subtitle: highlightsText
-      ? snapshot.provider === "gemini"
+      ? snapshot.provider === "gemini" || snapshot.provider === "cursor"
         ? `${limitsText}. ${highlightsText}. ${updatedText}.`
         : `${highlightsText}. ${limitsText}. ${updatedText}.`
       : `${limitsText}. ${updatedText}.`,
