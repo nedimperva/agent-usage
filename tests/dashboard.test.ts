@@ -94,6 +94,21 @@ describe("summarizeProviderSnapshot", () => {
     expect(summary.subtitle).toContain("Weekly Limit: 76%");
     expect(summary.subtitle).toContain("+1 more");
   });
+
+  it("places provider highlights ahead of quota summary", () => {
+    const summary = summarizeProviderSnapshot(
+      snapshot("cursor", {
+        highlights: ["Cycle: Feb 1, 2026 -> Mar 1, 2026", "Auto: Enabled", "Named: Enabled"],
+        quotas: [{ id: "plan", label: "Included Plan", remainingPercent: 60, remainingDisplay: "60% left", status: "ok" }],
+      }),
+      new Date("2026-02-23T12:00:00Z"),
+    );
+
+    expect(summary.subtitle).toContain("Cycle: Feb 1, 2026 -> Mar 1, 2026");
+    expect(summary.subtitle).toContain("Auto: Enabled");
+    expect(summary.subtitle).toContain("Named: Enabled");
+    expect(summary.subtitle).toContain("Included Plan: 60%");
+  });
 });
 
 describe("refresh orchestration", () => {

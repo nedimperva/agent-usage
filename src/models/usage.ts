@@ -41,6 +41,7 @@ export interface ProviderUsageSnapshot {
   planLabel?: string;
   fetchedAt: string;
   quotas: QuotaItem[];
+  highlights?: string[];
   source: SnapshotSource;
   errors?: string[];
   metadataSections?: SnapshotSection[];

@@ -1,6 +1,6 @@
 import { Icon, List } from "@raycast/api";
 import { ReactElement } from "react";
-import { formatRelativeTimestamp } from "../lib/date";
+import { formatAbsoluteTimestamp, formatRelativeTimestamp } from "../lib/date";
 import { summarizeProviderSnapshot } from "../lib/dashboard";
 import { quotaAccessories, quotaProgressIcon, statusIcon } from "../lib/format";
 import { ProviderUsageSnapshot } from "../models/usage";
@@ -32,6 +32,7 @@ export function ProviderDetailView({
   pendingCopilotExpiresAt,
   renderActions,
 }: ProviderDetailViewProps) {
+  const hiddenMetadataSectionIds = new Set(["account", "auth", "source"]);
   const summary = summarizeProviderSnapshot(snapshot);
   const staleStatus =
     snapshot.staleAfterSeconds !== undefined
@@ -45,6 +46,9 @@ export function ProviderDetailView({
         })()
       : undefined;
   const historyByQuotaId = new Map((snapshot.quotaHistory ?? []).map((series) => [series.quotaId, series]));
+  const visibleMetadataSections = (snapshot.metadataSections ?? []).filter(
+    (section) => !hiddenMetadataSectionIds.has(section.id),
+  );
   const rawPayloadSummary = (() => {
     const raw = snapshot.rawPayload;
     if (raw === undefined) {
@@ -72,7 +76,7 @@ export function ProviderDetailView({
           actions={renderActions(snapshot)}
         />
       </List.Section>
-      {snapshot.metadataSections?.map((section) => (
+      {visibleMetadataSections.map((section) => (
         <List.Section key={section.id} title={section.title}>
           {section.items.map((item, index) => (
             <List.Item
@@ -123,6 +127,8 @@ export function ProviderDetailView({
           {snapshot.quotas.map((quota) => {
             const history = historyByQuotaId.get(quota.id);
             const summaryHistory = history ? summarizeQuotaHistory(history) : undefined;
+            const latestPoint = history?.points[history.points.length - 1];
+            const latestObserved = formatAbsoluteTimestamp(latestPoint?.at);
             const deltaParts = [
               summaryHistory?.delta24h !== undefined
                 ? `24h ${summaryHistory.delta24h > 0 ? "+" : ""}${summaryHistory.delta24h.toFixed(1)}%`
@@ -130,6 +136,7 @@ export function ProviderDetailView({
               summaryHistory?.delta7d !== undefined
                 ? `7d ${summaryHistory.delta7d > 0 ? "+" : ""}${summaryHistory.delta7d.toFixed(1)}%`
                 : undefined,
+              latestObserved ? `Last ${latestObserved}` : undefined,
             ]
               .filter((part): part is string => !!part)
               .join(" | ");

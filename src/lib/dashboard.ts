@@ -92,6 +92,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
     : providerTitle(snapshot.provider);
   const updatedText = `Updated ${formatRelativeTimestamp(snapshot.fetchedAt, now.getTime())}`;
   const limitsText = quotaSummaryText(snapshot);
+  const highlightsText = snapshot.highlights?.filter((entry) => entry.trim().length > 0).join(" | ");
 
   if (isUnavailableSnapshot(snapshot)) {
     const reason = snapshot.quotas.find((quota) => quota.label === "Unavailable")?.remainingDisplay;
@@ -114,7 +115,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
   return {
     provider: snapshot.provider,
     title,
-    subtitle: `${limitsText}. ${updatedText}.`,
+    subtitle: highlightsText ? `${highlightsText}. ${limitsText}. ${updatedText}.` : `${limitsText}. ${updatedText}.`,
     status,
   };
 }

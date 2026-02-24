@@ -148,6 +148,30 @@ function formatDaysRemaining(targetIso?: string): string {
   return `${deltaDays} days`;
 }
 
+function truncateForHighlight(value: string, maxLength = 80): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function formatBillingDate(value?: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
 function toMajorUnits(value: unknown): number | undefined {
   const parsed = parseOptionalNumber(value);
   if (parsed === undefined) {
@@ -332,50 +356,36 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
   const email = safeString(user?.email);
   const billingStart = parseDateLike(summary.billingCycleStart ?? summary.billing_cycle_start);
   const billingEnd = parseDateLike(summary.billingCycleEnd ?? summary.billing_cycle_end);
+  const billingStartDisplay = formatBillingDate(billingStart);
+  const billingEndDisplay = formatBillingDate(billingEnd);
   const autoMessage = safeString(
     summary.autoModelSelectedDisplayMessage ?? summary.auto_model_selected_display_message,
   );
   const namedMessage = safeString(
     summary.namedModelSelectedDisplayMessage ?? summary.named_model_selected_display_message,
   );
-  const membershipRaw = safeString(summary.membershipType ?? summary.membership_type);
   const limitType = safeString(summary.limitType ?? summary.limit_type);
   const isUnlimited = summary.isUnlimited === true || summary.is_unlimited === true;
-  const userId = safeString(user?.sub);
+  const highlights = [
+    billingStartDisplay && billingEndDisplay ? `Cycle: ${billingStartDisplay} -> ${billingEndDisplay}` : undefined,
+    autoMessage ? `Auto: ${truncateForHighlight(autoMessage, 72)}` : undefined,
+    namedMessage ? `Named: ${truncateForHighlight(namedMessage, 72)}` : undefined,
+  ].filter((entry): entry is string => !!entry);
 
   return {
     provider: "cursor",
     planLabel: email ? `${planLabel} (${email})` : planLabel,
     fetchedAt: new Date().toISOString(),
     quotas,
+    highlights,
     source: "api",
     metadataSections: [
-      {
-        id: "account",
-        title: "Account",
-        items: [
-          { label: "Plan", value: planLabel },
-          { label: "Membership raw", value: membershipRaw ?? "unknown" },
-          { label: "Email", value: email ?? "unknown" },
-          { label: "User ID", value: userId ? `${userId.slice(0, 4)}...${userId.slice(-4)}` : "unknown" },
-        ],
-      },
-      {
-        id: "source",
-        title: "Source",
-        items: [
-          { label: "Source", value: "Cursor web API" },
-          { label: "Primary endpoint", value: `${CURSOR_BASE_URL}/api/usage-summary` },
-          { label: "Auth endpoint", value: `${CURSOR_BASE_URL}/api/auth/me` },
-          { label: "Legacy endpoint", value: `${CURSOR_BASE_URL}/api/usage?user=<id>` },
-        ],
-      },
       {
         id: "billing",
         title: "Billing",
         items: [
-          { label: "Cycle start", value: billingStart ?? "unknown" },
-          { label: "Cycle end", value: billingEnd ?? "unknown" },
+          { label: "Cycle start", value: billingStartDisplay || "unknown" },
+          { label: "Cycle end", value: billingEndDisplay || "unknown" },
           { label: "Days remaining", value: formatDaysRemaining(billingEnd) },
           { label: "Reset policy", value: "Billing cycle end from usage-summary" },
         ],
@@ -389,11 +399,11 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
         ],
       },
       {
-        id: "model-behavior",
-        title: "Model Behavior",
+        id: "usage-mode",
+        title: "Usage Mode",
         items: [
-          { label: "Auto model message", value: autoMessage ?? "n/a" },
-          { label: "Named model message", value: namedMessage ?? "n/a" },
+          { label: "Auto model usage", value: autoMessage ?? "n/a" },
+          { label: "Named model usage", value: namedMessage ?? "n/a" },
         ],
       },
     ],
