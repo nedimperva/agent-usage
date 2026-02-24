@@ -19,6 +19,8 @@ declare namespace Preferences {
   "codexAuthToken"?: string,
   /** Claude OAuth Access Token (Optional) - Optional OAuth token override. Leave empty to auto-read Claude credentials file. */
   "claudeAccessToken"?: string,
+  /** Gemini OAuth Access Token (Optional) - Optional OAuth token override. Leave empty to auto-read ~/.gemini/oauth_creds.json. */
+  "geminiAccessToken"?: string,
   /** Copilot API Token (Optional) - Optional manual token. You can also use device login from the command actions. */
   "copilotApiToken"?: string,
   /** Cursor Cookie Header (Optional) - Optional cookie header for Cursor web API (from an active cursor.com session). */
@@ -27,6 +29,8 @@ declare namespace Preferences {
   "codexUsageUrl": string,
   /** Claude Usage URL - Usage page opened by the Claude action. */
   "claudeUsageUrl": string,
+  /** Gemini Usage URL - Usage page opened by the Gemini action. */
+  "geminiUsageUrl": string,
   /** Copilot Usage URL - Usage page opened by the Copilot action. */
   "copilotUsageUrl": string,
   /** Cursor Usage URL - Usage page opened by the Cursor action. */

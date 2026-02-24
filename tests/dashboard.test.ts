@@ -109,6 +109,22 @@ describe("summarizeProviderSnapshot", () => {
     expect(summary.subtitle).toContain("Named: Enabled");
     expect(summary.subtitle).toContain("Included Plan: 60%");
   });
+
+  it("keeps gemini quota summary before project highlights", () => {
+    const summary = summarizeProviderSnapshot(
+      snapshot("gemini", {
+        highlights: ["Project: managed-project-123", "Tier: free-tier"],
+        quotas: [{ id: "gemini-pro", label: "Pro Models", remainingPercent: 48, remainingDisplay: "48% left", status: "ok" }],
+      }),
+      new Date("2026-02-23T12:00:00Z"),
+    );
+
+    const proIndex = summary.subtitle.indexOf("Pro Models: 48%");
+    const projectIndex = summary.subtitle.indexOf("Project: managed-project-123");
+    expect(proIndex).toBeGreaterThanOrEqual(0);
+    expect(projectIndex).toBeGreaterThanOrEqual(0);
+    expect(proIndex).toBeLessThan(projectIndex);
+  });
 });
 
 describe("refresh orchestration", () => {

@@ -1,7 +1,7 @@
 import { ProviderId, ProviderUsageSnapshot, QuotaStatus } from "../models/usage";
 import { formatRelativeTimestamp } from "./date";
 
-export const PROVIDER_ORDER: ProviderId[] = ["codex", "cursor", "copilot", "claude"];
+export const PROVIDER_ORDER: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini"];
 
 export interface ProviderRowSummary {
   provider: ProviderId;
@@ -40,6 +40,10 @@ function providerTitle(provider: ProviderId): string {
 
   if (provider === "cursor") {
     return "Cursor";
+  }
+
+  if (provider === "gemini") {
+    return "Gemini";
   }
 
   return "GitHub Copilot";
@@ -115,7 +119,11 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
   return {
     provider: snapshot.provider,
     title,
-    subtitle: highlightsText ? `${highlightsText}. ${limitsText}. ${updatedText}.` : `${limitsText}. ${updatedText}.`,
+    subtitle: highlightsText
+      ? snapshot.provider === "gemini"
+        ? `${limitsText}. ${highlightsText}. ${updatedText}.`
+        : `${highlightsText}. ${limitsText}. ${updatedText}.`
+      : `${limitsText}. ${updatedText}.`,
     status,
   };
 }

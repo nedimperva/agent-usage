@@ -33,6 +33,7 @@ import { fetchClaudeSnapshot } from "./providers/claude";
 import { fetchCodexSnapshot } from "./providers/codex";
 import { fetchCopilotSnapshot, pollCopilotDeviceToken, requestCopilotDeviceCode } from "./providers/copilot";
 import { fetchCursorSnapshot } from "./providers/cursor";
+import { fetchGeminiSnapshot } from "./providers/gemini";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
 const COPILOT_DEVICE_PENDING_KEY = "agent-usage.copilot.device-pending.v1";
@@ -42,10 +43,12 @@ const COPILOT_DEVICE_EVENTS_KEY = "agent-usage.copilot.device-events.v1";
 interface Preferences {
   codexAuthToken?: string;
   claudeAccessToken?: string;
+  geminiAccessToken?: string;
   copilotApiToken?: string;
   cursorCookieHeader?: string;
   codexUsageUrl?: string;
   claudeUsageUrl?: string;
+  geminiUsageUrl?: string;
   copilotUsageUrl?: string;
   cursorUsageUrl?: string;
 }
@@ -61,6 +64,7 @@ interface CopilotTokenFormProps {
 const PROVIDER_TITLES: Record<ProviderId, string> = {
   codex: "Codex",
   claude: "Claude",
+  gemini: "Gemini",
   copilot: "GitHub Copilot",
   cursor: "Cursor",
 };
@@ -88,6 +92,10 @@ function providerUrl(provider: ProviderId, preferences: Preferences): string {
 
   if (provider === "claude") {
     return preferences.claudeUsageUrl?.trim() || "https://claude.ai/settings/usage";
+  }
+
+  if (provider === "gemini") {
+    return preferences.geminiUsageUrl?.trim() || "https://aistudio.google.com/app/plan";
   }
 
   if (provider === "cursor") {
@@ -207,6 +215,10 @@ export default function Command() {
         return fetchCursorSnapshot(preferences.cursorCookieHeader);
       }
 
+      if (provider === "gemini") {
+        return fetchGeminiSnapshot(preferences.geminiAccessToken);
+      }
+
       const copilotToken = resolveCopilotToken();
       if (!copilotToken) {
         const pending = pendingCopilotLogin;
@@ -235,6 +247,7 @@ export default function Command() {
       preferences.codexAuthToken,
       preferences.copilotApiToken,
       preferences.cursorCookieHeader,
+      preferences.geminiAccessToken,
       resolveCopilotToken,
     ],
   );
@@ -535,6 +548,10 @@ export default function Command() {
         );
       }
 
+      if (providerId === "gemini") {
+        return buildFallbackSnapshot("gemini", "Run `gemini` to authenticate, then refresh.");
+      }
+
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
   }, [snapshots]);
@@ -570,6 +587,17 @@ export default function Command() {
         await showToast({
           title: "Cursor auth repair",
           message: "Set Cursor Cookie Header from an active cursor.com session, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "gemini") {
+        await Clipboard.copy("gemini");
+        await openExtensionPreferences();
+        await showToast({
+          title: "Gemini auth repair",
+          message: "Copied `gemini`. Run it in terminal to authenticate, then refresh.",
           style: Toast.Style.Success,
         });
         return;
