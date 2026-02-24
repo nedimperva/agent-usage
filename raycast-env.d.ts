@@ -27,6 +27,22 @@ declare namespace Preferences {
   "copilotApiToken"?: string,
   /** Cursor Cookie Header (Optional) - Optional cookie header for Cursor web API (from an active cursor.com session). */
   "cursorCookieHeader"?: string,
+  /** Cursor Cookie Source - Auto tries cached/environment/browser cookies; Manual uses only Cursor Cookie Header. */
+  "cursorCookieSourceMode": "auto" | "manual",
+  /** undefined - Show status highlights when providers report degraded/outage state. */
+  "checkProviderStatus": boolean,
+  /** OpenRouter API Key (Optional) - OpenRouter API key for credits and key quota endpoints. */
+  "openrouterApiKey"?: string,
+  /** z.ai API Key (Optional) - z.ai API key for usage quota endpoint. */
+  "zaiApiKey"?: string,
+  /** Kimi K2 API Key (Optional) - Kimi K2 API key for credit usage endpoint. */
+  "kimiK2ApiKey"?: string,
+  /** Amp Cookie Header (Optional) - Cookie header from an authenticated ampcode.com/settings request. */
+  "ampCookieHeader"?: string,
+  /** MiniMax API Key (Optional) - MiniMax API key for coding plan remains endpoint. */
+  "minimaxApiKey"?: string,
+  /** OpenCode Cookie Header (Optional) - Cookie header from an authenticated opencode.ai session. */
+  "opencodeCookieHeader"?: string,
   /** Codex Usage URL - Usage page opened by the Codex action. */
   "codexUsageUrl": string,
   /** Claude Usage URL - Usage page opened by the Claude action. */
@@ -40,7 +56,25 @@ declare namespace Preferences {
   /** Copilot Usage URL - Usage page opened by the Copilot action. */
   "copilotUsageUrl": string,
   /** Cursor Usage URL - Usage page opened by the Cursor action. */
-  "cursorUsageUrl": string
+  "cursorUsageUrl": string,
+  /** OpenRouter API Base URL (Optional) - Default is https://openrouter.ai/api/v1. */
+  "openrouterApiBaseUrl"?: string,
+  /** z.ai Quota URL (Optional) - Default is https://api.z.ai/api/monitor/usage/quota/limit. */
+  "zaiQuotaUrl"?: string,
+  /** OpenCode Workspace ID (Optional) - Optional wrk_... override for OpenCode usage fetch. */
+  "opencodeWorkspaceId"?: string,
+  /** OpenRouter Usage URL - Usage page opened by the OpenRouter action. */
+  "openrouterUsageUrl": string,
+  /** z.ai Usage URL - Usage page opened by the z.ai action. */
+  "zaiUsageUrl": string,
+  /** Kimi K2 Usage URL - Usage page opened by the Kimi K2 action. */
+  "kimiK2UsageUrl": string,
+  /** Amp Usage URL - Usage page opened by the Amp action. */
+  "ampUsageUrl": string,
+  /** MiniMax Usage URL - Usage page opened by the MiniMax action. */
+  "minimaxUsageUrl": string,
+  /** OpenCode Usage URL - Usage page opened by the OpenCode action. */
+  "opencodeUsageUrl": string
 }
 }
 

@@ -1,4 +1,16 @@
-export type ProviderId = "codex" | "claude" | "copilot" | "cursor" | "gemini" | "antigravity";
+export type ProviderId =
+  | "codex"
+  | "claude"
+  | "copilot"
+  | "cursor"
+  | "gemini"
+  | "antigravity"
+  | "openrouter"
+  | "zai"
+  | "kimi-k2"
+  | "amp"
+  | "minimax"
+  | "opencode";
 
 export type QuotaStatus = "ok" | "warning" | "critical" | "unknown";
 

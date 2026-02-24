@@ -2,7 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "agent-usage",
   "title": "Agent Usage",
-  "description": "Track Codex, Claude, Cursor, Gemini, Antigravity, and GitHub Copilot usage limits and resets in Raycast.",
+  "description": "Track Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and optional provider usage limits in Raycast.",
   "icon": "extension-icon.png",
   "author": "nedim_perva",
   "keywords": [
@@ -14,7 +14,10 @@
     "gemini",
     "antigravity",
     "copilot",
-    "cursor"
+    "cursor",
+    "openrouter",
+    "minimax",
+    "opencode"
   ],
   "platforms": [
     "Windows",
@@ -75,6 +78,74 @@
           "required": false
         },
         {
+          "name": "cursorCookieSourceMode",
+          "type": "dropdown",
+          "title": "Cursor Cookie Source",
+          "description": "Auto tries cached/environment/browser cookies; Manual uses only Cursor Cookie Header.",
+          "default": "auto",
+          "data": [
+            {
+              "title": "Auto",
+              "value": "auto"
+            },
+            {
+              "title": "Manual",
+              "value": "manual"
+            }
+          ],
+          "required": false
+        },
+        {
+          "name": "checkProviderStatus",
+          "type": "checkbox",
+          "label": "Enable Provider Status Checks",
+          "description": "Show status highlights when providers report degraded/outage state.",
+          "default": false,
+          "required": false
+        },
+        {
+          "name": "openrouterApiKey",
+          "type": "password",
+          "title": "OpenRouter API Key (Optional)",
+          "description": "OpenRouter API key for credits and key quota endpoints.",
+          "required": false
+        },
+        {
+          "name": "zaiApiKey",
+          "type": "password",
+          "title": "z.ai API Key (Optional)",
+          "description": "z.ai API key for usage quota endpoint.",
+          "required": false
+        },
+        {
+          "name": "kimiK2ApiKey",
+          "type": "password",
+          "title": "Kimi K2 API Key (Optional)",
+          "description": "Kimi K2 API key for credit usage endpoint.",
+          "required": false
+        },
+        {
+          "name": "ampCookieHeader",
+          "type": "password",
+          "title": "Amp Cookie Header (Optional)",
+          "description": "Cookie header from an authenticated ampcode.com/settings request.",
+          "required": false
+        },
+        {
+          "name": "minimaxApiKey",
+          "type": "password",
+          "title": "MiniMax API Key (Optional)",
+          "description": "MiniMax API key for coding plan remains endpoint.",
+          "required": false
+        },
+        {
+          "name": "opencodeCookieHeader",
+          "type": "password",
+          "title": "OpenCode Cookie Header (Optional)",
+          "description": "Cookie header from an authenticated opencode.ai session.",
+          "required": false
+        },
+        {
           "name": "codexUsageUrl",
           "type": "textfield",
           "title": "Codex Usage URL",
@@ -127,6 +198,75 @@
           "title": "Cursor Usage URL",
           "description": "Usage page opened by the Cursor action.",
           "default": "https://cursor.com/dashboard",
+          "required": false
+        },
+        {
+          "name": "openrouterApiBaseUrl",
+          "type": "textfield",
+          "title": "OpenRouter API Base URL (Optional)",
+          "description": "Default is https://openrouter.ai/api/v1.",
+          "required": false
+        },
+        {
+          "name": "zaiQuotaUrl",
+          "type": "textfield",
+          "title": "z.ai Quota URL (Optional)",
+          "description": "Default is https://api.z.ai/api/monitor/usage/quota/limit.",
+          "required": false
+        },
+        {
+          "name": "opencodeWorkspaceId",
+          "type": "textfield",
+          "title": "OpenCode Workspace ID (Optional)",
+          "description": "Optional wrk_... override for OpenCode usage fetch.",
+          "required": false
+        },
+        {
+          "name": "openrouterUsageUrl",
+          "type": "textfield",
+          "title": "OpenRouter Usage URL",
+          "description": "Usage page opened by the OpenRouter action.",
+          "default": "https://openrouter.ai/settings/credits",
+          "required": false
+        },
+        {
+          "name": "zaiUsageUrl",
+          "type": "textfield",
+          "title": "z.ai Usage URL",
+          "description": "Usage page opened by the z.ai action.",
+          "default": "https://z.ai/manage-apikey/subscription",
+          "required": false
+        },
+        {
+          "name": "kimiK2UsageUrl",
+          "type": "textfield",
+          "title": "Kimi K2 Usage URL",
+          "description": "Usage page opened by the Kimi K2 action.",
+          "default": "https://kimi-k2.ai",
+          "required": false
+        },
+        {
+          "name": "ampUsageUrl",
+          "type": "textfield",
+          "title": "Amp Usage URL",
+          "description": "Usage page opened by the Amp action.",
+          "default": "https://ampcode.com/settings",
+          "required": false
+        },
+        {
+          "name": "minimaxUsageUrl",
+          "type": "textfield",
+          "title": "MiniMax Usage URL",
+          "description": "Usage page opened by the MiniMax action.",
+          "default": "https://platform.minimax.io/user-center/payment/coding-plan",
+          "required": false
+        },
+        {
+          "name": "opencodeUsageUrl",
+          "type": "textfield",
+          "title": "OpenCode Usage URL",
+          "description": "Usage page opened by the OpenCode action.",
+          "default": "https://opencode.ai",
           "required": false
         }
       ]

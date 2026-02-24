@@ -23,4 +23,11 @@ describe("normalizeCursorCookieHeader", () => {
     const value = normalizeCursorCookieHeader("Cookie: a=1; malformed; b=2");
     expect(value).toBe("a=1; b=2");
   });
+
+  it("extracts cookie from a curl command", () => {
+    const value = normalizeCursorCookieHeader(
+      "curl 'https://cursor.com/api/usage-summary' -H 'Accept: application/json' -H 'Cookie: WorkosCursorSessionToken=abc; __Secure-next-auth.session-token=xyz'",
+    );
+    expect(value).toBe("WorkosCursorSessionToken=abc; __Secure-next-auth.session-token=xyz");
+  });
 });

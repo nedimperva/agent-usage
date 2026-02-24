@@ -17,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProviderDetailView, PendingCopilotDeviceLogin } from "./components/provider-detail-view";
 import {
   isUnavailableSnapshot,
+  CORE_PROVIDERS,
+  OPTIONAL_PROVIDERS,
   PROVIDER_ORDER,
   refreshAllProviders,
   refreshSingleProvider,
@@ -27,6 +29,7 @@ import { formatRelativeTimestamp } from "./lib/date";
 import { statusIcon } from "./lib/format";
 import { mergeQuotaHistory } from "./lib/history";
 import { redactSensitive } from "./lib/redact";
+import { fetchProviderStatus, ProviderStatusSnapshot, statusEndpointForProvider } from "./lib/status";
 import { loadDashboardState, mapSnapshotsByProvider, saveDashboardState } from "./lib/storage";
 import { ProviderId, ProviderUsageSnapshot } from "./models/usage";
 import { fetchClaudeSnapshot } from "./providers/claude";
@@ -35,11 +38,20 @@ import { fetchCopilotSnapshot, pollCopilotDeviceToken, requestCopilotDeviceCode 
 import { fetchCursorSnapshot } from "./providers/cursor";
 import { fetchGeminiSnapshot } from "./providers/gemini";
 import { fetchAntigravitySnapshot } from "./providers/antigravity";
+import { fetchOpenRouterSnapshot } from "./providers/openrouter";
+import { fetchZaiSnapshot } from "./providers/zai";
+import { fetchKimiK2Snapshot } from "./providers/kimi-k2";
+import { fetchAmpSnapshot } from "./providers/amp";
+import { fetchMiniMaxSnapshot } from "./providers/minimax";
+import { fetchOpenCodeSnapshot } from "./providers/opencode";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
 const COPILOT_DEVICE_PENDING_KEY = "agent-usage.copilot.device-pending.v1";
 const COPILOT_LAST_SUCCESS_KEY = "agent-usage.copilot.last-success-at.v1";
 const COPILOT_DEVICE_EVENTS_KEY = "agent-usage.copilot.device-events.v1";
+const OPTIONAL_PROVIDERS_KEY = "agent-usage.optional-providers.v1";
+const CURSOR_COOKIE_CACHE_KEY = "agent-usage.cursor.cookie-cache.v1";
+const PROVIDER_STATUS_CACHE_TTL_MS = 15 * 60 * 1000;
 
 interface Preferences {
   codexAuthToken?: string;
@@ -47,19 +59,38 @@ interface Preferences {
   geminiAccessToken?: string;
   antigravityCsrfToken?: string;
   antigravityServerUrl?: string;
+  checkProviderStatus?: boolean;
   copilotApiToken?: string;
   cursorCookieHeader?: string;
+  cursorCookieSourceMode?: "auto" | "manual";
+  openrouterApiKey?: string;
+  openrouterApiBaseUrl?: string;
+  zaiApiKey?: string;
+  zaiQuotaUrl?: string;
+  kimiK2ApiKey?: string;
+  ampCookieHeader?: string;
+  minimaxApiKey?: string;
+  opencodeCookieHeader?: string;
+  opencodeWorkspaceId?: string;
   codexUsageUrl?: string;
   claudeUsageUrl?: string;
   geminiUsageUrl?: string;
   antigravityUsageUrl?: string;
   copilotUsageUrl?: string;
   cursorUsageUrl?: string;
+  openrouterUsageUrl?: string;
+  zaiUsageUrl?: string;
+  kimiK2UsageUrl?: string;
+  ampUsageUrl?: string;
+  minimaxUsageUrl?: string;
+  opencodeUsageUrl?: string;
 }
 
 interface CopilotTokenFormValues {
   token: string;
 }
+
+type OptionalProvidersFormValues = Partial<Record<ProviderId, boolean>>;
 
 interface CopilotTokenFormProps {
   onSave: (token: string) => Promise<void>;
@@ -72,6 +103,12 @@ const PROVIDER_TITLES: Record<ProviderId, string> = {
   antigravity: "Antigravity",
   copilot: "GitHub Copilot",
   cursor: "Cursor",
+  openrouter: "OpenRouter",
+  zai: "z.ai",
+  "kimi-k2": "Kimi K2",
+  amp: "Amp",
+  minimax: "MiniMax",
+  opencode: "OpenCode",
 };
 
 function buildFallbackSnapshot(provider: ProviderId, reason: string): ProviderUsageSnapshot {
@@ -113,6 +150,30 @@ function providerUrl(provider: ProviderId, preferences: Preferences): string {
     return preferences.cursorUsageUrl?.trim() || "https://cursor.com/dashboard";
   }
 
+  if (provider === "openrouter") {
+    return preferences.openrouterUsageUrl?.trim() || "https://openrouter.ai/settings/credits";
+  }
+
+  if (provider === "zai") {
+    return preferences.zaiUsageUrl?.trim() || "https://z.ai/manage-apikey/subscription";
+  }
+
+  if (provider === "kimi-k2") {
+    return preferences.kimiK2UsageUrl?.trim() || "https://kimi-k2.ai";
+  }
+
+  if (provider === "amp") {
+    return preferences.ampUsageUrl?.trim() || "https://ampcode.com/settings";
+  }
+
+  if (provider === "minimax") {
+    return preferences.minimaxUsageUrl?.trim() || "https://platform.minimax.io/user-center/payment/coding-plan";
+  }
+
+  if (provider === "opencode") {
+    return preferences.opencodeUsageUrl?.trim() || "https://opencode.ai";
+  }
+
   return preferences.copilotUsageUrl?.trim() || "https://github.com/settings/copilot";
 }
 
@@ -146,15 +207,149 @@ function CopilotTokenForm({ onSave }: CopilotTokenFormProps) {
   );
 }
 
+interface OptionalProvidersFormProps {
+  enabledProviders: ProviderId[];
+  onSave: (providers: ProviderId[]) => Promise<void>;
+}
+
+function OptionalProvidersForm({ enabledProviders, onSave }: OptionalProvidersFormProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const enabledSet = new Set(enabledProviders);
+
+  return (
+    <Form
+      isLoading={isSubmitting}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Save Optional Providers"
+            icon={Icon.CheckCircle}
+            onSubmit={async (values: OptionalProvidersFormValues) => {
+              setIsSubmitting(true);
+              try {
+                const nextEnabled = OPTIONAL_PROVIDERS.filter((provider) => values[provider] === true);
+                await onSave(nextEnabled);
+                await popToRoot();
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.Description
+        title="Optional Providers"
+        text="Optional providers stay hidden until enabled here or credentials are configured."
+      />
+      {OPTIONAL_PROVIDERS.map((provider) => (
+        <Form.Checkbox
+          key={provider}
+          id={provider}
+          label={PROVIDER_TITLES[provider]}
+          title={PROVIDER_TITLES[provider]}
+          defaultValue={enabledSet.has(provider)}
+        />
+      ))}
+    </Form>
+  );
+}
+
+function parseOptionalProviders(raw: string | undefined): ProviderId[] {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter(
+      (entry): entry is ProviderId => typeof entry === "string" && OPTIONAL_PROVIDERS.includes(entry as ProviderId),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function providerHasConfiguredAuth(provider: ProviderId, preferences: Preferences): boolean {
+  if (provider === "openrouter") {
+    return !!(preferences.openrouterApiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim());
+  }
+  if (provider === "zai") {
+    return !!(preferences.zaiApiKey?.trim() || process.env.Z_AI_API_KEY?.trim());
+  }
+  if (provider === "kimi-k2") {
+    return !!(
+      preferences.kimiK2ApiKey?.trim() ||
+      process.env.KIMI_K2_API_KEY?.trim() ||
+      process.env.KIMI_API_KEY?.trim()
+    );
+  }
+  if (provider === "amp") {
+    return !!(
+      preferences.ampCookieHeader?.trim() ||
+      process.env.AMP_COOKIE_HEADER?.trim() ||
+      process.env.AMP_COOKIE?.trim()
+    );
+  }
+  if (provider === "minimax") {
+    return !!(preferences.minimaxApiKey?.trim() || process.env.MINIMAX_API_KEY?.trim());
+  }
+  if (provider === "opencode") {
+    return !!(
+      preferences.opencodeCookieHeader?.trim() ||
+      process.env.OPENCODE_COOKIE_HEADER?.trim() ||
+      process.env.OPENCODE_COOKIE?.trim()
+    );
+  }
+  return true;
+}
+
+function hasSuccessfulSnapshot(snapshot: ProviderUsageSnapshot | undefined): boolean {
+  if (!snapshot) {
+    return false;
+  }
+  return !isUnavailableSnapshot(snapshot);
+}
+
+function resolveVisibleProviderOrder(
+  enabledOptionalProviders: ProviderId[],
+  preferences: Preferences,
+  snapshots: SnapshotMap,
+): ProviderId[] {
+  const enabledSet = new Set(enabledOptionalProviders);
+  const visibleOptional = OPTIONAL_PROVIDERS.filter((provider) => {
+    if (enabledSet.has(provider)) {
+      return true;
+    }
+    if (providerHasConfiguredAuth(provider, preferences)) {
+      return true;
+    }
+    if (hasSuccessfulSnapshot(snapshots[provider])) {
+      return true;
+    }
+    return false;
+  });
+
+  return [...CORE_PROVIDERS, ...visibleOptional];
+}
+
 export default function Command() {
   const preferences = getPreferenceValues<Preferences>();
   const [snapshots, setSnapshots] = useState<SnapshotMap>({});
+  const [enabledOptionalProviders, setEnabledOptionalProviders] = useState<ProviderId[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
   const [refreshingProvider, setRefreshingProvider] = useState<ProviderId | undefined>();
   const [lastRefreshAt, setLastRefreshAt] = useState<string | undefined>();
   const snapshotsRef = useRef<SnapshotMap>({});
+  const visibleProviderOrderRef = useRef<ProviderId[]>(CORE_PROVIDERS);
+  const hasHydratedRef = useRef(false);
   const copilotTokenRef = useRef<string | undefined>(undefined);
+  const cursorCookieCacheRef = useRef<string | undefined>(undefined);
+  const providerStatusCacheRef = useRef<Partial<Record<ProviderId, ProviderStatusSnapshot>>>({});
   const [copilotTokenState, setCopilotTokenState] = useState<string | undefined>();
   const [pendingCopilotLogin, setPendingCopilotLogin] = useState<PendingCopilotDeviceLogin | undefined>();
   const [copilotLastSuccessAt, setCopilotLastSuccessAt] = useState<string | undefined>();
@@ -163,6 +358,14 @@ export default function Command() {
   useEffect(() => {
     snapshotsRef.current = snapshots;
   }, [snapshots]);
+
+  const visibleProviderOrder = useMemo(() => {
+    return resolveVisibleProviderOrder(enabledOptionalProviders, preferences, snapshots);
+  }, [enabledOptionalProviders, preferences, snapshots]);
+
+  useEffect(() => {
+    visibleProviderOrderRef.current = visibleProviderOrder;
+  }, [visibleProviderOrder]);
 
   const isPendingCopilotLoginExpired = useCallback((pending: PendingCopilotDeviceLogin | undefined): boolean => {
     if (!pending) {
@@ -212,26 +415,126 @@ export default function Command() {
     return copilotTokenRef.current?.trim();
   }, [preferences.copilotApiToken]);
 
+  const enrichSnapshotWithStatus = useCallback(
+    async (snapshot: ProviderUsageSnapshot): Promise<ProviderUsageSnapshot> => {
+      if (!preferences.checkProviderStatus) {
+        return snapshot;
+      }
+
+      const endpoint = statusEndpointForProvider(snapshot.provider);
+      if (!endpoint) {
+        return snapshot;
+      }
+
+      const now = Date.now();
+      const cached = providerStatusCacheRef.current[snapshot.provider];
+      const cachedAt = cached ? Date.parse(cached.checkedAt) : NaN;
+      let statusSnapshot = cached;
+
+      if (!cached || Number.isNaN(cachedAt) || now - cachedAt > PROVIDER_STATUS_CACHE_TTL_MS) {
+        statusSnapshot = await fetchProviderStatus(snapshot.provider);
+        if (statusSnapshot) {
+          providerStatusCacheRef.current[snapshot.provider] = statusSnapshot;
+        }
+      }
+
+      if (!statusSnapshot || statusSnapshot.level === "operational" || statusSnapshot.level === "unknown") {
+        return snapshot;
+      }
+
+      const statusText = `${statusSnapshot.level.toUpperCase()}: ${statusSnapshot.summary}`;
+      const nextHighlights = [...(snapshot.highlights ?? [])];
+      if (!nextHighlights.some((entry) => entry === `Status: ${statusText}`)) {
+        nextHighlights.push(`Status: ${statusText}`);
+      }
+
+      const existingSections = snapshot.metadataSections ?? [];
+      const statusSection = {
+        id: "service-status",
+        title: "Service Status",
+        items: [
+          { label: "Level", value: statusSnapshot.level },
+          { label: "Summary", value: statusSnapshot.summary },
+          { label: "Endpoint", value: endpoint },
+          { label: "Checked", value: statusSnapshot.checkedAt },
+        ],
+      };
+      const metadataSections = [
+        ...existingSections.filter((section) => section.id !== "service-status"),
+        statusSection,
+      ];
+      return {
+        ...snapshot,
+        highlights: nextHighlights,
+        metadataSections,
+      };
+    },
+    [preferences.checkProviderStatus],
+  );
+
   const fetchProviderSnapshot = useCallback(
     async (provider: ProviderId): Promise<ProviderUsageSnapshot> => {
+      const withStatus = async (snapshot: ProviderUsageSnapshot): Promise<ProviderUsageSnapshot> =>
+        enrichSnapshotWithStatus(snapshot);
+
       if (provider === "codex") {
-        return fetchCodexSnapshot(preferences.codexAuthToken);
+        return withStatus(await fetchCodexSnapshot(preferences.codexAuthToken));
       }
 
       if (provider === "claude") {
-        return fetchClaudeSnapshot(preferences.claudeAccessToken);
+        return withStatus(await fetchClaudeSnapshot(preferences.claudeAccessToken));
       }
 
       if (provider === "cursor") {
-        return fetchCursorSnapshot(preferences.cursorCookieHeader);
+        return withStatus(
+          await fetchCursorSnapshot({
+            cookieHeader: preferences.cursorCookieHeader,
+            cookieSourceMode: preferences.cursorCookieSourceMode,
+            cachedCookieHeader: cursorCookieCacheRef.current,
+            onCookieResolved: async (cookieHeader) => {
+              cursorCookieCacheRef.current = cookieHeader;
+              await LocalStorage.setItem(CURSOR_COOKIE_CACHE_KEY, cookieHeader);
+            },
+          }),
+        );
       }
 
       if (provider === "gemini") {
-        return fetchGeminiSnapshot(preferences.geminiAccessToken);
+        return withStatus(await fetchGeminiSnapshot(preferences.geminiAccessToken));
       }
 
       if (provider === "antigravity") {
-        return fetchAntigravitySnapshot(preferences.antigravityServerUrl, preferences.antigravityCsrfToken);
+        return withStatus(
+          await fetchAntigravitySnapshot(preferences.antigravityServerUrl, preferences.antigravityCsrfToken),
+        );
+      }
+
+      if (provider === "openrouter") {
+        return withStatus(
+          await fetchOpenRouterSnapshot(preferences.openrouterApiKey, preferences.openrouterApiBaseUrl),
+        );
+      }
+
+      if (provider === "zai") {
+        return withStatus(await fetchZaiSnapshot(preferences.zaiApiKey, preferences.zaiQuotaUrl));
+      }
+
+      if (provider === "kimi-k2") {
+        return withStatus(await fetchKimiK2Snapshot(preferences.kimiK2ApiKey));
+      }
+
+      if (provider === "amp") {
+        return withStatus(await fetchAmpSnapshot(preferences.ampCookieHeader));
+      }
+
+      if (provider === "minimax") {
+        return withStatus(await fetchMiniMaxSnapshot(preferences.minimaxApiKey));
+      }
+
+      if (provider === "opencode") {
+        return withStatus(
+          await fetchOpenCodeSnapshot(preferences.opencodeCookieHeader, preferences.opencodeWorkspaceId),
+        );
       }
 
       const copilotToken = resolveCopilotToken();
@@ -247,24 +550,38 @@ export default function Command() {
       }
 
       const tokenSource = preferences.copilotApiToken?.trim() ? "preference" : "local storage";
-      return fetchCopilotSnapshot(copilotToken, {
-        tokenSource,
-        lastSuccessAt: copilotLastSuccessAt,
-        recentDeviceEvents: copilotDeviceEvents.slice(0, 3),
-      });
+      return withStatus(
+        await fetchCopilotSnapshot(copilotToken, {
+          tokenSource,
+          lastSuccessAt: copilotLastSuccessAt,
+          recentDeviceEvents: copilotDeviceEvents.slice(0, 3),
+        }),
+      );
     },
     [
+      enrichSnapshotWithStatus,
       copilotDeviceEvents,
       copilotLastSuccessAt,
       isPendingCopilotLoginExpired,
       pendingCopilotLogin,
       preferences.claudeAccessToken,
+      preferences.checkProviderStatus,
       preferences.codexAuthToken,
       preferences.copilotApiToken,
       preferences.cursorCookieHeader,
+      preferences.cursorCookieSourceMode,
       preferences.geminiAccessToken,
       preferences.antigravityServerUrl,
       preferences.antigravityCsrfToken,
+      preferences.openrouterApiKey,
+      preferences.openrouterApiBaseUrl,
+      preferences.zaiApiKey,
+      preferences.zaiQuotaUrl,
+      preferences.kimiK2ApiKey,
+      preferences.ampCookieHeader,
+      preferences.minimaxApiKey,
+      preferences.opencodeCookieHeader,
+      preferences.opencodeWorkspaceId,
       resolveCopilotToken,
     ],
   );
@@ -325,13 +642,16 @@ export default function Command() {
       setIsRefreshingAll(true);
 
       try {
+        const providerOrder = visibleProviderOrderRef.current;
         const result = await refreshAllProviders(
           snapshotsRef.current,
           fetchProviderSnapshot,
           fallbackSnapshotForProvider,
+          undefined,
+          providerOrder,
         );
         const mergedSnapshots: SnapshotMap = { ...result.snapshots };
-        for (const providerId of PROVIDER_ORDER) {
+        for (const providerId of providerOrder) {
           const candidate = result.snapshots[providerId];
           if (!candidate) {
             continue;
@@ -399,6 +719,22 @@ export default function Command() {
     });
     await refreshProvider("copilot", false);
   }, [refreshProvider]);
+
+  const saveOptionalProviders = useCallback(
+    async (providers: ProviderId[]) => {
+      const normalized = OPTIONAL_PROVIDERS.filter((provider) => providers.includes(provider));
+      setEnabledOptionalProviders(normalized);
+      visibleProviderOrderRef.current = resolveVisibleProviderOrder(normalized, preferences, snapshotsRef.current);
+      await LocalStorage.setItem(OPTIONAL_PROVIDERS_KEY, JSON.stringify(normalized));
+      await showToast({
+        title: "Optional providers updated",
+        message: `${normalized.length} enabled`,
+        style: Toast.Style.Success,
+      });
+      await refreshAllRemoteProviders(false);
+    },
+    [preferences, refreshAllRemoteProviders],
+  );
 
   const startCopilotDeviceFlow = useCallback(async () => {
     const startingToast = await showToast({
@@ -489,15 +825,29 @@ export default function Command() {
   ]);
 
   useEffect(() => {
+    if (hasHydratedRef.current) {
+      return;
+    }
+    hasHydratedRef.current = true;
+
     async function hydrate() {
-      const [state, storedCopilotToken, storedPendingRaw, storedCopilotSuccess, storedCopilotEvents] =
-        await Promise.all([
-          loadDashboardState(),
-          LocalStorage.getItem<string>(COPILOT_TOKEN_STORAGE_KEY),
-          LocalStorage.getItem<string>(COPILOT_DEVICE_PENDING_KEY),
-          LocalStorage.getItem<string>(COPILOT_LAST_SUCCESS_KEY),
-          LocalStorage.getItem<string>(COPILOT_DEVICE_EVENTS_KEY),
-        ]);
+      const [
+        state,
+        storedCopilotToken,
+        storedPendingRaw,
+        storedCopilotSuccess,
+        storedCopilotEvents,
+        storedOptionalProviders,
+        storedCursorCookie,
+      ] = await Promise.all([
+        loadDashboardState(),
+        LocalStorage.getItem<string>(COPILOT_TOKEN_STORAGE_KEY),
+        LocalStorage.getItem<string>(COPILOT_DEVICE_PENDING_KEY),
+        LocalStorage.getItem<string>(COPILOT_LAST_SUCCESS_KEY),
+        LocalStorage.getItem<string>(COPILOT_DEVICE_EVENTS_KEY),
+        LocalStorage.getItem<string>(OPTIONAL_PROVIDERS_KEY),
+        LocalStorage.getItem<string>(CURSOR_COOKIE_CACHE_KEY),
+      ]);
 
       const normalizedStoredToken = storedCopilotToken?.trim();
       if (normalizedStoredToken) {
@@ -531,10 +881,21 @@ export default function Command() {
         }
       }
 
+      cursorCookieCacheRef.current = storedCursorCookie?.trim();
+
+      const initialSnapshots = state?.snapshots?.length ? mapSnapshotsByProvider(state.snapshots) : {};
       if (state?.snapshots?.length) {
-        setSnapshots(mapSnapshotsByProvider(state.snapshots));
+        setSnapshots(initialSnapshots);
         setLastRefreshAt(state.lastRefreshAt);
       }
+
+      const initialOptionalProviders = parseOptionalProviders(storedOptionalProviders);
+      setEnabledOptionalProviders(initialOptionalProviders);
+      visibleProviderOrderRef.current = resolveVisibleProviderOrder(
+        initialOptionalProviders,
+        preferences,
+        initialSnapshots,
+      );
 
       setIsLoading(false);
       await refreshAllRemoteProviders(false);
@@ -544,7 +905,7 @@ export default function Command() {
   }, [isPendingCopilotLoginExpired, refreshAllRemoteProviders]);
 
   const renderedSnapshots = useMemo(() => {
-    return PROVIDER_ORDER.map((providerId) => {
+    return visibleProviderOrder.map((providerId) => {
       const snapshot = snapshots[providerId];
       if (snapshot) {
         return snapshot;
@@ -561,7 +922,7 @@ export default function Command() {
       if (providerId === "cursor") {
         return buildFallbackSnapshot(
           "cursor",
-          "Set Cursor Cookie Header in extension preferences from a valid cursor.com session.",
+          "Use Cursor Cookie Source Auto (browser import) or set Cursor Cookie Header manually.",
         );
       }
 
@@ -576,11 +937,43 @@ export default function Command() {
         );
       }
 
+      if (providerId === "openrouter") {
+        return buildFallbackSnapshot("openrouter", "Set OpenRouter API Key in extension preferences.");
+      }
+
+      if (providerId === "zai") {
+        return buildFallbackSnapshot("zai", "Set z.ai API Key in extension preferences.");
+      }
+
+      if (providerId === "kimi-k2") {
+        return buildFallbackSnapshot("kimi-k2", "Set Kimi K2 API Key in extension preferences.");
+      }
+
+      if (providerId === "amp") {
+        return buildFallbackSnapshot("amp", "Set Amp Cookie Header in preferences or AMP_COOKIE_HEADER env.");
+      }
+
+      if (providerId === "minimax") {
+        return buildFallbackSnapshot("minimax", "Set MiniMax API Key in extension preferences.");
+      }
+
+      if (providerId === "opencode") {
+        return buildFallbackSnapshot(
+          "opencode",
+          "Set OpenCode Cookie Header in preferences or OPENCODE_COOKIE_HEADER env.",
+        );
+      }
+
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
-  }, [snapshots]);
+  }, [snapshots, visibleProviderOrder]);
 
   const hasStoredCopilotToken = !!copilotTokenState?.trim();
+  const configuredOptionalCount = useMemo(
+    () => OPTIONAL_PROVIDERS.filter((provider) => providerHasConfiguredAuth(provider, preferences)).length,
+    [preferences],
+  );
+  const visibleOptionalCount = Math.max(0, visibleProviderOrder.length - CORE_PROVIDERS.length);
 
   const repairProviderAuth = useCallback(
     async (provider: ProviderId) => {
@@ -610,7 +1003,7 @@ export default function Command() {
         await openExtensionPreferences();
         await showToast({
           title: "Cursor auth repair",
-          message: "Set Cursor Cookie Header from an active cursor.com session, then refresh.",
+          message: "Set Cursor Cookie Source to Auto or provide a Cursor Cookie Header, then refresh.",
           style: Toast.Style.Success,
         });
         return;
@@ -632,6 +1025,66 @@ export default function Command() {
         await showToast({
           title: "Antigravity auth repair",
           message: "Auto-detect works when Antigravity is running; otherwise set Server URL + CSRF token.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "openrouter") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "OpenRouter auth repair",
+          message: "Set OpenRouter API Key in preferences, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "zai") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "z.ai auth repair",
+          message: "Set z.ai API Key in preferences, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "kimi-k2") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "Kimi K2 auth repair",
+          message: "Set Kimi K2 API Key in preferences, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "amp") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "Amp auth repair",
+          message: "Set Amp Cookie Header in preferences (or AMP_COOKIE_HEADER env), then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "minimax") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "MiniMax auth repair",
+          message: "Set MiniMax API Key in preferences, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "opencode") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "OpenCode auth repair",
+          message: "Set OpenCode Cookie Header in preferences (or OPENCODE_COOKIE_HEADER env), then refresh.",
           style: Toast.Style.Success,
         });
         return;
@@ -759,6 +1212,11 @@ export default function Command() {
           icon={Icon.Clipboard}
           content={JSON.stringify(redactSensitive(snapshot), null, 2)}
         />
+        <Action.Push
+          title="Manage Optional Providers"
+          icon={Icon.List}
+          target={<OptionalProvidersForm enabledProviders={enabledOptionalProviders} onSave={saveOptionalProviders} />}
+        />
         <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
       </ActionPanel>
     ),
@@ -766,12 +1224,14 @@ export default function Command() {
       cancelCopilotDeviceFlow,
       clearStoredCopilotToken,
       completeCopilotDeviceFlow,
+      enabledOptionalProviders,
       hasStoredCopilotToken,
       pendingCopilotLogin,
       preferences,
       refreshAllRemoteProviders,
       refreshProvider,
       repairProviderAuth,
+      saveOptionalProviders,
       saveCopilotToken,
       startCopilotDeviceFlow,
     ],
@@ -829,6 +1289,16 @@ export default function Command() {
                     icon={Icon.RotateClockwise}
                     onAction={() => void refreshAllRemoteProviders(true)}
                   />
+                  <Action.Push
+                    title="Manage Optional Providers"
+                    icon={Icon.List}
+                    target={
+                      <OptionalProvidersForm
+                        enabledProviders={enabledOptionalProviders}
+                        onSave={saveOptionalProviders}
+                      />
+                    }
+                  />
                 </ActionPanel>
               }
             />
@@ -855,6 +1325,23 @@ export default function Command() {
                 title="Refresh All"
                 icon={Icon.ArrowClockwise}
                 onAction={() => void refreshAllRemoteProviders(true)}
+              />
+              <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
+            </ActionPanel>
+          }
+        />
+        <List.Item
+          icon={Icon.List}
+          title="Optional Providers"
+          subtitle={`${visibleOptionalCount} visible, ${enabledOptionalProviders.length} manually enabled, ${configuredOptionalCount} configured`}
+          actions={
+            <ActionPanel>
+              <Action.Push
+                title="Manage Optional Providers"
+                icon={Icon.List}
+                target={
+                  <OptionalProvidersForm enabledProviders={enabledOptionalProviders} onSave={saveOptionalProviders} />
+                }
               />
               <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
             </ActionPanel>

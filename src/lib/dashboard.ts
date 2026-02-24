@@ -1,7 +1,9 @@
 import { ProviderId, ProviderUsageSnapshot, QuotaStatus } from "../models/usage";
 import { formatRelativeTimestamp } from "./date";
 
-export const PROVIDER_ORDER: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini", "antigravity"];
+export const CORE_PROVIDERS: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini", "antigravity"];
+export const OPTIONAL_PROVIDERS: ProviderId[] = ["openrouter", "zai", "kimi-k2", "amp", "minimax", "opencode"];
+export const PROVIDER_ORDER: ProviderId[] = [...CORE_PROVIDERS, ...OPTIONAL_PROVIDERS];
 
 export interface ProviderRowSummary {
   provider: ProviderId;
@@ -48,6 +50,30 @@ function providerTitle(provider: ProviderId): string {
 
   if (provider === "antigravity") {
     return "Antigravity";
+  }
+
+  if (provider === "openrouter") {
+    return "OpenRouter";
+  }
+
+  if (provider === "zai") {
+    return "z.ai";
+  }
+
+  if (provider === "kimi-k2") {
+    return "Kimi K2";
+  }
+
+  if (provider === "amp") {
+    return "Amp";
+  }
+
+  if (provider === "minimax") {
+    return "MiniMax";
+  }
+
+  if (provider === "opencode") {
+    return "OpenCode";
   }
 
   return "GitHub Copilot";

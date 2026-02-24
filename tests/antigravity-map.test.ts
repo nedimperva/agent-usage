@@ -60,8 +60,8 @@ describe("mapAntigravityResponseToQuotas", () => {
 
     expect(quotas).toHaveLength(3);
     expect(quotas.map((quota) => quota.label)).toEqual(["Claude", "Gemini Pro", "Gemini Flash"]);
-    expect(quotas.find((quota) => quota.label === "Claude")?.remainingPercent).toBe(100);
-    expect(quotas.find((quota) => quota.label === "Gemini Pro")?.remainingPercent).toBe(100);
+    expect(quotas.find((quota) => quota.label === "Claude")?.remainingPercent).toBeUndefined();
+    expect(quotas.find((quota) => quota.label === "Gemini Pro")?.remainingPercent).toBeUndefined();
   });
 
   it("falls back to lowest remaining quotas when preferred labels are absent", () => {

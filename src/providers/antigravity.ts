@@ -104,10 +104,10 @@ function isSuccessCode(code: unknown): boolean {
   return comparable === "ok" || comparable === "success" || comparable === "0";
 }
 
-function normalizeRemainingPercent(raw: unknown, assumeFullWhenMissing = false): number | undefined {
+function normalizeRemainingPercent(raw: unknown): number | undefined {
   const parsed = parseOptionalNumber(raw);
   if (parsed === undefined) {
-    return assumeFullWhenMissing ? 100 : undefined;
+    return undefined;
   }
 
   const percent = parsed <= 1 ? parsed * 100 : parsed;
@@ -453,20 +453,25 @@ export function mapAntigravityResponseToQuotas(payload: AntigravityStatusRespons
   for (const config of modelConfigs) {
     const modelId = safeString(config.modelOrAlias?.model) ?? safeString(config.label);
     const resetAt = parseDateLike(config.quotaInfo?.resetTime);
-    const remainingPercent = normalizeRemainingPercent(config.quotaInfo?.remainingFraction, !!resetAt);
-    if (!modelId || remainingPercent === undefined) {
+    const remainingPercent = normalizeRemainingPercent(config.quotaInfo?.remainingFraction);
+    if (!modelId) {
       continue;
     }
 
     const label = pickFriendlyLabel(safeString(config.label) ?? modelId);
-    const usedPercent = Math.max(0, 100 - remainingPercent);
+    const usedPercent = remainingPercent !== undefined ? Math.max(0, 100 - remainingPercent) : undefined;
     quotas.push({
       id: `antigravity-${slug(modelId) || "quota"}`,
       label,
       remainingPercent,
-      remainingDisplay: `${formatPercent(remainingPercent)} left (${formatPercent(usedPercent)} used)`,
+      remainingDisplay:
+        remainingPercent !== undefined
+          ? `${formatPercent(remainingPercent)} left (${formatPercent(usedPercent ?? 0)} used)`
+          : resetAt
+            ? "Remaining usage unavailable (reset time provided)."
+            : "Remaining usage unavailable.",
       resetAt,
-      status: statusFromRemainingPercent(remainingPercent),
+      status: remainingPercent !== undefined ? statusFromRemainingPercent(remainingPercent) : "unknown",
     });
   }
 
