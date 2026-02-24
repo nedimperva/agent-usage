@@ -1,4 +1,5 @@
 import { ProviderUsageSnapshot } from "../models/usage";
+import { discoverBrowserCookieCandidates } from "../lib/browser-cookies";
 import { formatPercent, parseDateLike, parseOptionalNumber, statusFromRemainingPercent } from "../lib/normalize";
 
 const AMP_SETTINGS_URL = "https://ampcode.com/settings";
@@ -11,6 +12,20 @@ interface AmpUsageData {
   hourly: number;
   windowHours?: number;
   resetAt?: string;
+}
+
+type AmpCookieSourceMode = "auto" | "manual";
+
+interface AmpCookieCandidate {
+  header: string;
+  source: string;
+}
+
+interface AmpFetchOptions {
+  cookieHeader?: string;
+  cookieSourceMode?: AmpCookieSourceMode;
+  cachedCookieHeader?: string;
+  onCookieResolved?: (cookieHeader: string, source: string) => void | Promise<void>;
 }
 
 function parseCookieLineFromMultilineInput(input: string): string | undefined {
@@ -68,19 +83,52 @@ function normalizeCookieHeader(value: string): string {
     .join("; ");
 }
 
-function resolveCookieHeader(manualCookieHeader?: string): { header: string; source: string } {
-  const candidates = [
-    { value: manualCookieHeader, source: "manual preference" },
-    { value: process.env.AMP_COOKIE_HEADER, source: "environment AMP_COOKIE_HEADER" },
-    { value: process.env.AMP_COOKIE, source: "environment AMP_COOKIE" },
-  ];
-  for (const candidate of candidates) {
-    const normalized = candidate.value ? normalizeCookieHeader(candidate.value) : "";
-    if (normalized) {
-      return { header: normalized, source: candidate.source };
-    }
+function normalizeAmpSourceMode(value: string | undefined): AmpCookieSourceMode {
+  if (value?.toLowerCase() === "manual") {
+    return "manual";
   }
-  throw new Error("Amp cookie header missing. Set Amp Cookie Header in preferences or AMP_COOKIE_HEADER env.");
+  return "auto";
+}
+
+async function resolveAmpCookieCandidates(options: AmpFetchOptions): Promise<{
+  candidates: AmpCookieCandidate[];
+  hasChromiumV20: boolean;
+}> {
+  const manual = options.cookieHeader?.trim();
+  const cached = options.cachedCookieHeader?.trim();
+  const envCookie = process.env.AMP_COOKIE_HEADER?.trim() || process.env.AMP_COOKIE?.trim();
+  const sourceMode = normalizeAmpSourceMode(options.cookieSourceMode);
+  const candidates: AmpCookieCandidate[] = [];
+  const pushCandidate = (header: string | undefined, source: string) => {
+    if (!header) {
+      return;
+    }
+    const normalized = normalizeCookieHeader(header);
+    if (!normalized) {
+      return;
+    }
+    if (candidates.some((candidate) => candidate.header === normalized)) {
+      return;
+    }
+    candidates.push({ header: normalized, source });
+  };
+
+  pushCandidate(manual, "manual preference");
+  pushCandidate(cached, "cache");
+  pushCandidate(envCookie, "environment");
+  if (sourceMode === "manual") {
+    return { candidates, hasChromiumV20: false };
+  }
+
+  const discovery = await discoverBrowserCookieCandidates(["ampcode.com"]);
+  for (const candidate of discovery.candidates) {
+    pushCandidate(candidate.header, candidate.source);
+  }
+
+  return {
+    candidates,
+    hasChromiumV20: discovery.hasChromiumV20,
+  };
 }
 
 function extractObjectByToken(text: string, token: string): string | undefined {
@@ -281,32 +329,74 @@ function looksSignedOut(html: string): boolean {
   );
 }
 
-export async function fetchAmpSnapshot(manualCookieHeader?: string): Promise<ProviderUsageSnapshot> {
-  const cookie = resolveCookieHeader(manualCookieHeader);
-
-  const response = await fetch(AMP_SETTINGS_URL, {
-    method: "GET",
-    headers: {
-      Cookie: cookie.header,
-      Accept: "text/html,application/xhtml+xml",
-      "User-Agent": AMP_USER_AGENT,
-    },
-  });
-  const html = await response.text();
-
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403 || looksSignedOut(html)) {
-      throw new Error("Amp session cookie is invalid or expired.");
+export async function fetchAmpSnapshot(input?: string | AmpFetchOptions): Promise<ProviderUsageSnapshot> {
+  const options: AmpFetchOptions = typeof input === "string" ? { cookieHeader: input } : (input ?? {});
+  const sourceMode = normalizeAmpSourceMode(options.cookieSourceMode);
+  const resolved = await resolveAmpCookieCandidates(options);
+  if (resolved.candidates.length === 0) {
+    if (sourceMode === "manual") {
+      throw new Error("Amp Cookie Source is manual, but no Amp Cookie Header is configured.");
     }
-    throw new Error(`Amp settings request failed (${response.status}).`);
+    if (resolved.hasChromiumV20) {
+      throw new Error(
+        "Amp browser cookies are Chrome app-bound (`v20`) and cannot be auto-read here. Use Manual mode and paste a Cookie header from ampcode.com/settings.",
+      );
+    }
+    throw new Error("No Amp cookie session found. Set header manually or use Auto with an authenticated browser.");
   }
 
-  const usage = parseAmpUsage(html);
-  if (!usage) {
-    if (looksSignedOut(html)) {
-      throw new Error("Amp session cookie is invalid or expired.");
+  let usage: AmpUsageData | undefined;
+  let selectedCookie: AmpCookieCandidate | undefined;
+  let lastError: Error | undefined;
+  const attemptedSources: string[] = [];
+  for (const candidate of resolved.candidates) {
+    attemptedSources.push(candidate.source);
+    const response = await fetch(AMP_SETTINGS_URL, {
+      method: "GET",
+      headers: {
+        Cookie: candidate.header,
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": AMP_USER_AGENT,
+      },
+    });
+    const html = await response.text();
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || looksSignedOut(html)) {
+        lastError = new Error("Amp session cookie is invalid or expired.");
+        continue;
+      }
+      lastError = new Error(`Amp settings request failed (${response.status}).`);
+      continue;
     }
-    throw new Error("Amp Free usage data not found on settings page.");
+
+    const parsedUsage = parseAmpUsage(html);
+    if (!parsedUsage) {
+      if (looksSignedOut(html)) {
+        lastError = new Error("Amp session cookie is invalid or expired.");
+        continue;
+      }
+      lastError = new Error("Amp Free usage data not found on settings page.");
+      continue;
+    }
+
+    usage = parsedUsage;
+    selectedCookie = candidate;
+    break;
+  }
+
+  if (!usage || !selectedCookie) {
+    const attempted = attemptedSources.length > 0 ? ` Tried sources: ${attemptedSources.join(", ")}.` : "";
+    const reason = lastError?.message ?? "Amp cookie is invalid/expired. Sign in to ampcode.com and refresh.";
+    const v20Hint =
+      resolved.hasChromiumV20 && sourceMode === "auto"
+        ? " Browser cookies appear app-bound (`v20`); use Manual mode with a copied Cookie header."
+        : "";
+    throw new Error(`${reason}${attempted}${v20Hint}`);
+  }
+
+  if (options.onCookieResolved) {
+    await options.onCookieResolved(selectedCookie.header, selectedCookie.source);
   }
 
   const quota = Math.max(0, usage.quota);
@@ -346,7 +436,9 @@ export async function fetchAmpSnapshot(manualCookieHeader?: string): Promise<Pro
         id: "usage-mode",
         title: "Usage Mode",
         items: [
-          { label: "Source", value: `Amp settings page (${cookie.source})` },
+          { label: "Cookie source mode", value: sourceMode },
+          { label: "Cookie source", value: selectedCookie.source },
+          { label: "Source", value: "Amp settings page (cookie session)" },
           { label: "Endpoint", value: AMP_SETTINGS_URL },
           { label: "Hourly replenishment", value: `${hourly.toFixed(2)}` },
           { label: "Window", value: windowMinutes ? `${windowMinutes} minutes` : "unknown" },

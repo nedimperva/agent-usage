@@ -37,13 +37,20 @@ function resolveOpenRouterBaseUrl(manualBaseUrl?: string): string {
 }
 
 async function requestOpenRouterJson<T>(url: string, apiKey: string): Promise<T> {
+  const httpReferer = process.env.OPENROUTER_HTTP_REFERER?.trim();
+  const xTitle = process.env.OPENROUTER_X_TITLE?.trim() || "Agent Usage";
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+    "X-Title": xTitle,
+  };
+  if (httpReferer) {
+    headers["HTTP-Referer"] = httpReferer;
+  }
+
   const response = await fetch(url, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "application/json",
-      "X-Title": "Agent Usage",
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -61,12 +68,20 @@ async function requestOpenRouterKey(url: string, apiKey: string): Promise<OpenRo
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
+    const httpReferer = process.env.OPENROUTER_HTTP_REFERER?.trim();
+    const xTitle = process.env.OPENROUTER_X_TITLE?.trim() || "Agent Usage";
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+      "X-Title": xTitle,
+    };
+    if (httpReferer) {
+      headers["HTTP-Referer"] = httpReferer;
+    }
+
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
+      headers,
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -138,6 +153,8 @@ export async function fetchOpenRouterSnapshot(
 
   const requests = parseOptionalNumber(key?.data?.rate_limit?.requests);
   const interval = safeString(key?.data?.rate_limit?.interval);
+  const httpReferer = process.env.OPENROUTER_HTTP_REFERER?.trim();
+  const xTitle = process.env.OPENROUTER_X_TITLE?.trim() || "Agent Usage";
 
   return {
     provider: "openrouter",
@@ -153,6 +170,8 @@ export async function fetchOpenRouterSnapshot(
           { label: "Source", value: "OpenRouter API key" },
           { label: "Credits endpoint", value: creditsEndpoint },
           { label: "Key endpoint", value: keyEndpoint },
+          { label: "HTTP Referer", value: httpReferer ?? "not set" },
+          { label: "X-Title", value: xTitle },
           { label: "Rate limit", value: requests !== undefined ? `${requests}/${interval ?? "window"}` : "unknown" },
         ],
       },

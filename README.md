@@ -7,6 +7,7 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
 - Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, Gemini, Antigravity, and Copilot.
 - Optional providers (`OpenRouter`, `z.ai`, `Kimi K2`, `Amp`, `MiniMax`, `OpenCode`) are hidden by default and only shown when enabled or configured.
 - Cursor supports `Auto` cookie source mode with cached reuse and best-effort browser import.
+- Amp/OpenCode/MiniMax support cookie `Auto` source mode with cached/env/browser fallback.
 - Provider drilldown views with quota details, inline issues, provider-scoped actions, and richer provider metadata.
 - Progress rings based on real remaining percentage.
 - Copilot device login flow inside the command.
@@ -34,8 +35,8 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
 - z.ai: quota endpoint (`https://api.z.ai/api/monitor/usage/quota/limit`) with API key auth.
 - Kimi K2: credit endpoint (`https://kimi-k2.ai/api/user/credits`) with API key auth.
 - Amp: settings page (`https://ampcode.com/settings`) with cookie header auth.
-- MiniMax: coding plan endpoint (`https://api.minimax.io/v1/coding_plan/remains`) with API key auth.
-- OpenCode: server function endpoint (`https://opencode.ai/_server`) with cookie header auth.
+- MiniMax: coding plan endpoints (`/v1/api/openplatform/coding_plan/remains`, `/v1/coding_plan/remains`) with API key auth, plus cookie-session fallback.
+- OpenCode: server function endpoint (`https://opencode.ai/_server`) with cookie-session auth.
 
 ## Requirements
 
@@ -81,16 +82,22 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
    - Uses local Antigravity language-server quota endpoints
 7. OpenRouter
    - Set `OpenRouter API Key` in extension preferences (or `OPENROUTER_API_KEY` env var)
+   - Optional client headers via env: `OPENROUTER_HTTP_REFERER`, `OPENROUTER_X_TITLE`
 8. z.ai
    - Set `z.ai API Key` in extension preferences (or `Z_AI_API_KEY` env var)
 9. Kimi K2
    - Set `Kimi K2 API Key` in extension preferences (or `KIMI_K2_API_KEY` / `KIMI_API_KEY` env var)
 10. Amp
-   - Set `Amp Cookie Header` from an authenticated `ampcode.com/settings` request
+   - Set `Amp Cookie Source` to `Auto` (recommended) or `Manual`
+   - In `Auto`, extension tries manual header, cached cookie, env var, and browser import
+   - In `Manual`, set `Amp Cookie Header` from an authenticated `ampcode.com/settings` request
 11. MiniMax
-   - Set `MiniMax API Key` in extension preferences (or `MINIMAX_API_KEY` env var)
+   - Preferred: set `MiniMax API Key` in extension preferences (or `MINIMAX_API_KEY` env var)
+   - Optional: set `MiniMax Cookie Source` to `Auto`/`Manual` and provide `MiniMax Cookie Header` for web-session fallback
 12. OpenCode
-   - Set `OpenCode Cookie Header` from an authenticated `opencode.ai` session
+   - Set `OpenCode Cookie Source` to `Auto` (recommended) or `Manual`
+   - In `Auto`, extension tries manual header, cached cookie, env var, and browser import
+   - In `Manual`, set `OpenCode Cookie Header` from an authenticated `opencode.ai` session
 
 ## Optional provider visibility
 
@@ -126,6 +133,7 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
 5. If Antigravity is unavailable, keep Antigravity running for auto-detect, or set server URL + CSRF token in preferences, then refresh.
 6. If Copilot is unavailable, use device login again or set a fresh token.
 7. If optional providers are missing from dashboard, open `Manage Optional Providers` and enable them.
+8. For Amp/OpenCode/MiniMax cookie mode on Chrome, app-bound (`v20`) cookies may require manual Cookie header paste.
 
 ## Known limitations
 

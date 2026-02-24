@@ -51,6 +51,9 @@ const COPILOT_LAST_SUCCESS_KEY = "agent-usage.copilot.last-success-at.v1";
 const COPILOT_DEVICE_EVENTS_KEY = "agent-usage.copilot.device-events.v1";
 const OPTIONAL_PROVIDERS_KEY = "agent-usage.optional-providers.v1";
 const CURSOR_COOKIE_CACHE_KEY = "agent-usage.cursor.cookie-cache.v1";
+const AMP_COOKIE_CACHE_KEY = "agent-usage.amp.cookie-cache.v1";
+const OPENCODE_COOKIE_CACHE_KEY = "agent-usage.opencode.cookie-cache.v1";
+const MINIMAX_COOKIE_CACHE_KEY = "agent-usage.minimax.cookie-cache.v1";
 const PROVIDER_STATUS_CACHE_TTL_MS = 15 * 60 * 1000;
 
 interface Preferences {
@@ -69,8 +72,12 @@ interface Preferences {
   zaiQuotaUrl?: string;
   kimiK2ApiKey?: string;
   ampCookieHeader?: string;
+  ampCookieSourceMode?: "auto" | "manual";
   minimaxApiKey?: string;
+  minimaxCookieHeader?: string;
+  minimaxCookieSourceMode?: "auto" | "manual";
   opencodeCookieHeader?: string;
+  opencodeCookieSourceMode?: "auto" | "manual";
   opencodeWorkspaceId?: string;
   codexUsageUrl?: string;
   claudeUsageUrl?: string;
@@ -295,7 +302,13 @@ function providerHasConfiguredAuth(provider: ProviderId, preferences: Preference
     );
   }
   if (provider === "minimax") {
-    return !!(preferences.minimaxApiKey?.trim() || process.env.MINIMAX_API_KEY?.trim());
+    return !!(
+      preferences.minimaxApiKey?.trim() ||
+      preferences.minimaxCookieHeader?.trim() ||
+      process.env.MINIMAX_API_KEY?.trim() ||
+      process.env.MINIMAX_COOKIE_HEADER?.trim() ||
+      process.env.MINIMAX_COOKIE?.trim()
+    );
   }
   if (provider === "opencode") {
     return !!(
@@ -349,6 +362,9 @@ export default function Command() {
   const hasHydratedRef = useRef(false);
   const copilotTokenRef = useRef<string | undefined>(undefined);
   const cursorCookieCacheRef = useRef<string | undefined>(undefined);
+  const ampCookieCacheRef = useRef<string | undefined>(undefined);
+  const opencodeCookieCacheRef = useRef<string | undefined>(undefined);
+  const minimaxCookieCacheRef = useRef<string | undefined>(undefined);
   const providerStatusCacheRef = useRef<Partial<Record<ProviderId, ProviderStatusSnapshot>>>({});
   const [copilotTokenState, setCopilotTokenState] = useState<string | undefined>();
   const [pendingCopilotLogin, setPendingCopilotLogin] = useState<PendingCopilotDeviceLogin | undefined>();
@@ -524,16 +540,46 @@ export default function Command() {
       }
 
       if (provider === "amp") {
-        return withStatus(await fetchAmpSnapshot(preferences.ampCookieHeader));
+        return withStatus(
+          await fetchAmpSnapshot({
+            cookieHeader: preferences.ampCookieHeader,
+            cookieSourceMode: preferences.ampCookieSourceMode,
+            cachedCookieHeader: ampCookieCacheRef.current,
+            onCookieResolved: async (cookieHeader) => {
+              ampCookieCacheRef.current = cookieHeader;
+              await LocalStorage.setItem(AMP_COOKIE_CACHE_KEY, cookieHeader);
+            },
+          }),
+        );
       }
 
       if (provider === "minimax") {
-        return withStatus(await fetchMiniMaxSnapshot(preferences.minimaxApiKey));
+        return withStatus(
+          await fetchMiniMaxSnapshot({
+            apiKey: preferences.minimaxApiKey,
+            cookieHeader: preferences.minimaxCookieHeader,
+            cookieSourceMode: preferences.minimaxCookieSourceMode,
+            cachedCookieHeader: minimaxCookieCacheRef.current,
+            onCookieResolved: async (cookieHeader) => {
+              minimaxCookieCacheRef.current = cookieHeader;
+              await LocalStorage.setItem(MINIMAX_COOKIE_CACHE_KEY, cookieHeader);
+            },
+          }),
+        );
       }
 
       if (provider === "opencode") {
         return withStatus(
-          await fetchOpenCodeSnapshot(preferences.opencodeCookieHeader, preferences.opencodeWorkspaceId),
+          await fetchOpenCodeSnapshot({
+            cookieHeader: preferences.opencodeCookieHeader,
+            cookieSourceMode: preferences.opencodeCookieSourceMode,
+            cachedCookieHeader: opencodeCookieCacheRef.current,
+            workspaceId: preferences.opencodeWorkspaceId,
+            onCookieResolved: async (cookieHeader) => {
+              opencodeCookieCacheRef.current = cookieHeader;
+              await LocalStorage.setItem(OPENCODE_COOKIE_CACHE_KEY, cookieHeader);
+            },
+          }),
         );
       }
 
@@ -579,8 +625,12 @@ export default function Command() {
       preferences.zaiQuotaUrl,
       preferences.kimiK2ApiKey,
       preferences.ampCookieHeader,
+      preferences.ampCookieSourceMode,
       preferences.minimaxApiKey,
+      preferences.minimaxCookieHeader,
+      preferences.minimaxCookieSourceMode,
       preferences.opencodeCookieHeader,
+      preferences.opencodeCookieSourceMode,
       preferences.opencodeWorkspaceId,
       resolveCopilotToken,
     ],
@@ -839,6 +889,9 @@ export default function Command() {
         storedCopilotEvents,
         storedOptionalProviders,
         storedCursorCookie,
+        storedAmpCookie,
+        storedOpenCodeCookie,
+        storedMiniMaxCookie,
       ] = await Promise.all([
         loadDashboardState(),
         LocalStorage.getItem<string>(COPILOT_TOKEN_STORAGE_KEY),
@@ -847,6 +900,9 @@ export default function Command() {
         LocalStorage.getItem<string>(COPILOT_DEVICE_EVENTS_KEY),
         LocalStorage.getItem<string>(OPTIONAL_PROVIDERS_KEY),
         LocalStorage.getItem<string>(CURSOR_COOKIE_CACHE_KEY),
+        LocalStorage.getItem<string>(AMP_COOKIE_CACHE_KEY),
+        LocalStorage.getItem<string>(OPENCODE_COOKIE_CACHE_KEY),
+        LocalStorage.getItem<string>(MINIMAX_COOKIE_CACHE_KEY),
       ]);
 
       const normalizedStoredToken = storedCopilotToken?.trim();
@@ -882,6 +938,9 @@ export default function Command() {
       }
 
       cursorCookieCacheRef.current = storedCursorCookie?.trim();
+      ampCookieCacheRef.current = storedAmpCookie?.trim();
+      opencodeCookieCacheRef.current = storedOpenCodeCookie?.trim();
+      minimaxCookieCacheRef.current = storedMiniMaxCookie?.trim();
 
       const initialSnapshots = state?.snapshots?.length ? mapSnapshotsByProvider(state.snapshots) : {};
       if (state?.snapshots?.length) {
@@ -950,17 +1009,23 @@ export default function Command() {
       }
 
       if (providerId === "amp") {
-        return buildFallbackSnapshot("amp", "Set Amp Cookie Header in preferences or AMP_COOKIE_HEADER env.");
+        return buildFallbackSnapshot(
+          "amp",
+          "Set Amp Cookie Source Auto (browser import) or set Amp Cookie Header manually.",
+        );
       }
 
       if (providerId === "minimax") {
-        return buildFallbackSnapshot("minimax", "Set MiniMax API Key in extension preferences.");
+        return buildFallbackSnapshot(
+          "minimax",
+          "Set MiniMax API Key, or use MiniMax Cookie Source Auto/manual with authenticated session.",
+        );
       }
 
       if (providerId === "opencode") {
         return buildFallbackSnapshot(
           "opencode",
-          "Set OpenCode Cookie Header in preferences or OPENCODE_COOKIE_HEADER env.",
+          "Set OpenCode Cookie Source Auto (browser import) or set OpenCode Cookie Header manually.",
         );
       }
 
@@ -1064,7 +1129,7 @@ export default function Command() {
         await openExtensionPreferences();
         await showToast({
           title: "Amp auth repair",
-          message: "Set Amp Cookie Header in preferences (or AMP_COOKIE_HEADER env), then refresh.",
+          message: "Set Amp Cookie Source to Auto or provide Amp Cookie Header, then refresh.",
           style: Toast.Style.Success,
         });
         return;
@@ -1074,7 +1139,7 @@ export default function Command() {
         await openExtensionPreferences();
         await showToast({
           title: "MiniMax auth repair",
-          message: "Set MiniMax API Key in preferences, then refresh.",
+          message: "Set MiniMax API Key or MiniMax Cookie Source/header in preferences, then refresh.",
           style: Toast.Style.Success,
         });
         return;
@@ -1084,7 +1149,7 @@ export default function Command() {
         await openExtensionPreferences();
         await showToast({
           title: "OpenCode auth repair",
-          message: "Set OpenCode Cookie Header in preferences (or OPENCODE_COOKIE_HEADER env), then refresh.",
+          message: "Set OpenCode Cookie Source to Auto or provide OpenCode Cookie Header, then refresh.",
           style: Toast.Style.Success,
         });
         return;

@@ -1,4 +1,5 @@
 import { ProviderUsageSnapshot } from "../models/usage";
+import { discoverBrowserCookieCandidates } from "../lib/browser-cookies";
 import { parseDateLike, parseOptionalNumber, statusFromRemainingPercent } from "../lib/normalize";
 
 const OPENCODE_SERVER_URL = "https://opencode.ai/_server";
@@ -41,6 +42,21 @@ const OPENCODE_RESET_AT_KEYS = [
 ];
 const OPENCODE_USED_KEYS = ["used", "usage", "consumed", "count", "usedTokens"];
 const OPENCODE_LIMIT_KEYS = ["limit", "total", "quota", "max", "cap", "tokenLimit"];
+
+type OpenCodeCookieSourceMode = "auto" | "manual";
+
+interface OpenCodeCookieCandidate {
+  header: string;
+  source: string;
+}
+
+interface OpenCodeFetchOptions {
+  cookieHeader?: string;
+  cookieSourceMode?: OpenCodeCookieSourceMode;
+  cachedCookieHeader?: string;
+  workspaceId?: string;
+  onCookieResolved?: (cookieHeader: string, source: string) => void | Promise<void>;
+}
 
 function parseCookieLineFromMultilineInput(input: string): string | undefined {
   const lines = input.split(/\r?\n/);
@@ -98,23 +114,52 @@ function normalizeCookieHeader(value: string): string {
     .join("; ");
 }
 
-function resolveCookieHeader(manualCookieHeader?: string): { header: string; source: string } {
-  const candidates = [
-    { value: manualCookieHeader, source: "manual preference" },
-    { value: process.env.OPENCODE_COOKIE_HEADER, source: "environment OPENCODE_COOKIE_HEADER" },
-    { value: process.env.OPENCODE_COOKIE, source: "environment OPENCODE_COOKIE" },
-  ];
+function normalizeOpenCodeSourceMode(value: string | undefined): OpenCodeCookieSourceMode {
+  if (value?.toLowerCase() === "manual") {
+    return "manual";
+  }
+  return "auto";
+}
 
-  for (const candidate of candidates) {
-    const normalized = candidate.value ? normalizeCookieHeader(candidate.value) : "";
-    if (normalized) {
-      return { header: normalized, source: candidate.source };
+async function resolveOpenCodeCookieCandidates(options: OpenCodeFetchOptions): Promise<{
+  candidates: OpenCodeCookieCandidate[];
+  hasChromiumV20: boolean;
+}> {
+  const manual = options.cookieHeader?.trim();
+  const cached = options.cachedCookieHeader?.trim();
+  const envCookie = process.env.OPENCODE_COOKIE_HEADER?.trim() || process.env.OPENCODE_COOKIE?.trim();
+  const sourceMode = normalizeOpenCodeSourceMode(options.cookieSourceMode);
+  const candidates: OpenCodeCookieCandidate[] = [];
+  const pushCandidate = (header: string | undefined, source: string) => {
+    if (!header) {
+      return;
     }
+    const normalized = normalizeCookieHeader(header);
+    if (!normalized) {
+      return;
+    }
+    if (candidates.some((candidate) => candidate.header === normalized)) {
+      return;
+    }
+    candidates.push({ header: normalized, source });
+  };
+
+  pushCandidate(manual, "manual preference");
+  pushCandidate(cached, "cache");
+  pushCandidate(envCookie, "environment");
+  if (sourceMode === "manual") {
+    return { candidates, hasChromiumV20: false };
   }
 
-  throw new Error(
-    "OpenCode cookie header missing. Set OpenCode Cookie Header in preferences or OPENCODE_COOKIE_HEADER env.",
-  );
+  const discovery = await discoverBrowserCookieCandidates(["opencode.ai"]);
+  for (const candidate of discovery.candidates) {
+    pushCandidate(candidate.header, candidate.source);
+  }
+
+  return {
+    candidates,
+    hasChromiumV20: discovery.hasChromiumV20,
+  };
 }
 
 function normalizeWorkspaceId(raw?: string): string | undefined {
@@ -585,21 +630,69 @@ async function fetchSubscriptionTextWithFallback(
 }
 
 export async function fetchOpenCodeSnapshot(
-  manualCookieHeader?: string,
+  input?: string | OpenCodeFetchOptions,
   workspaceIdPreference?: string,
 ): Promise<ProviderUsageSnapshot> {
-  const cookie = resolveCookieHeader(manualCookieHeader);
-  const now = new Date();
-  const workspaceOverride = workspaceIdPreference?.trim() || process.env.CODEXBAR_OPENCODE_WORKSPACE_ID?.trim();
-  const workspaceId = normalizeWorkspaceId(workspaceOverride) ?? (await fetchWorkspaceId(cookie.header));
-  if (!workspaceId) {
-    throw new Error("OpenCode workspace ID not found in session.");
+  const options: OpenCodeFetchOptions = typeof input === "string" ? { cookieHeader: input } : (input ?? {});
+  const sourceMode = normalizeOpenCodeSourceMode(options.cookieSourceMode);
+  const resolved = await resolveOpenCodeCookieCandidates(options);
+  if (resolved.candidates.length === 0) {
+    if (sourceMode === "manual") {
+      throw new Error("OpenCode Cookie Source is manual, but no OpenCode Cookie Header is configured.");
+    }
+    if (resolved.hasChromiumV20) {
+      throw new Error(
+        "OpenCode browser cookies are Chrome app-bound (`v20`) and cannot be auto-read here. Use Manual mode and paste a Cookie header from opencode.ai.",
+      );
+    }
+    throw new Error(
+      "No OpenCode cookie session found. Set header manually or use Auto with an authenticated browser session.",
+    );
   }
 
-  const subscriptionText = await fetchSubscriptionTextWithFallback(workspaceId, cookie.header, now);
-  const usage = parseSubscription(subscriptionText, now);
-  if (!usage) {
-    throw new Error("OpenCode subscription usage fields are missing.");
+  const now = new Date();
+  const workspaceOverride =
+    options.workspaceId?.trim() || workspaceIdPreference?.trim() || process.env.CODEXBAR_OPENCODE_WORKSPACE_ID?.trim();
+  let selectedCookie: OpenCodeCookieCandidate | undefined;
+  let workspaceId: string | undefined;
+  let usage:
+    | { rollingUsedPercent: number; rollingResetInSec: number; weeklyUsedPercent: number; weeklyResetInSec: number }
+    | undefined;
+  let lastError: Error | undefined;
+  const attemptedSources: string[] = [];
+
+  for (const candidate of resolved.candidates) {
+    attemptedSources.push(candidate.source);
+    try {
+      workspaceId = normalizeWorkspaceId(workspaceOverride) ?? (await fetchWorkspaceId(candidate.header));
+      if (!workspaceId) {
+        throw new Error("OpenCode workspace ID not found in session.");
+      }
+      const subscriptionText = await fetchSubscriptionTextWithFallback(workspaceId, candidate.header, now);
+      usage = parseSubscription(subscriptionText, now);
+      if (!usage) {
+        throw new Error("OpenCode subscription usage fields are missing.");
+      }
+      selectedCookie = candidate;
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+  }
+
+  if (!selectedCookie || !workspaceId || !usage) {
+    const attempted = attemptedSources.length > 0 ? ` Tried sources: ${attemptedSources.join(", ")}.` : "";
+    const reason = lastError?.message ?? "OpenCode cookie is invalid/expired. Sign in to opencode.ai and refresh.";
+    const v20Hint =
+      resolved.hasChromiumV20 && sourceMode === "auto"
+        ? " Browser cookies appear app-bound (`v20`); use Manual mode with a copied Cookie header."
+        : "";
+    throw new Error(`${reason}${attempted}${v20Hint}`);
+  }
+
+  if (options.onCookieResolved) {
+    await options.onCookieResolved(selectedCookie.header, selectedCookie.source);
   }
 
   const rollingRemaining = Math.max(0, Math.min(100, 100 - usage.rollingUsedPercent));
@@ -633,7 +726,9 @@ export async function fetchOpenCodeSnapshot(
         id: "usage-mode",
         title: "Usage Mode",
         items: [
-          { label: "Source", value: `OpenCode session cookie (${cookie.source})` },
+          { label: "Cookie source mode", value: sourceMode },
+          { label: "Cookie source", value: selectedCookie.source },
+          { label: "Source", value: "OpenCode session cookie" },
           { label: "Workspace", value: workspaceId },
           { label: "Endpoint", value: OPENCODE_SERVER_URL },
         ],

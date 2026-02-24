@@ -39,10 +39,18 @@ declare namespace Preferences {
   "kimiK2ApiKey"?: string,
   /** Amp Cookie Header (Optional) - Cookie header from an authenticated ampcode.com/settings request. */
   "ampCookieHeader"?: string,
+  /** Amp Cookie Source - Auto tries manual/cached/env/browser cookies; Manual uses only Amp Cookie Header. */
+  "ampCookieSourceMode": "auto" | "manual",
   /** MiniMax API Key (Optional) - MiniMax API key for coding plan remains endpoint. */
   "minimaxApiKey"?: string,
+  /** MiniMax Cookie Header (Optional) - Cookie header or cURL from an authenticated platform.minimax.io session. */
+  "minimaxCookieHeader"?: string,
+  /** MiniMax Cookie Source - Auto tries manual/cached/env/browser cookies when API key is unavailable. */
+  "minimaxCookieSourceMode": "auto" | "manual",
   /** OpenCode Cookie Header (Optional) - Cookie header from an authenticated opencode.ai session. */
   "opencodeCookieHeader"?: string,
+  /** OpenCode Cookie Source - Auto tries manual/cached/env/browser cookies; Manual uses only OpenCode Cookie Header. */
+  "opencodeCookieSourceMode": "auto" | "manual",
   /** Codex Usage URL - Usage page opened by the Codex action. */
   "codexUsageUrl": string,
   /** Claude Usage URL - Usage page opened by the Claude action. */

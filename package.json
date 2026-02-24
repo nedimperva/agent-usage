@@ -132,6 +132,24 @@
           "required": false
         },
         {
+          "name": "ampCookieSourceMode",
+          "type": "dropdown",
+          "title": "Amp Cookie Source",
+          "description": "Auto tries manual/cached/env/browser cookies; Manual uses only Amp Cookie Header.",
+          "default": "auto",
+          "data": [
+            {
+              "title": "Auto",
+              "value": "auto"
+            },
+            {
+              "title": "Manual",
+              "value": "manual"
+            }
+          ],
+          "required": false
+        },
+        {
           "name": "minimaxApiKey",
           "type": "password",
           "title": "MiniMax API Key (Optional)",
@@ -139,10 +157,53 @@
           "required": false
         },
         {
+          "name": "minimaxCookieHeader",
+          "type": "password",
+          "title": "MiniMax Cookie Header (Optional)",
+          "description": "Cookie header or cURL from an authenticated platform.minimax.io session.",
+          "required": false
+        },
+        {
+          "name": "minimaxCookieSourceMode",
+          "type": "dropdown",
+          "title": "MiniMax Cookie Source",
+          "description": "Auto tries manual/cached/env/browser cookies when API key is unavailable.",
+          "default": "auto",
+          "data": [
+            {
+              "title": "Auto",
+              "value": "auto"
+            },
+            {
+              "title": "Manual",
+              "value": "manual"
+            }
+          ],
+          "required": false
+        },
+        {
           "name": "opencodeCookieHeader",
           "type": "password",
           "title": "OpenCode Cookie Header (Optional)",
           "description": "Cookie header from an authenticated opencode.ai session.",
+          "required": false
+        },
+        {
+          "name": "opencodeCookieSourceMode",
+          "type": "dropdown",
+          "title": "OpenCode Cookie Source",
+          "description": "Auto tries manual/cached/env/browser cookies; Manual uses only OpenCode Cookie Header.",
+          "default": "auto",
+          "data": [
+            {
+              "title": "Auto",
+              "value": "auto"
+            },
+            {
+              "title": "Manual",
+              "value": "manual"
+            }
+          ],
           "required": false
         },
         {
