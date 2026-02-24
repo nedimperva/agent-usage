@@ -1,4 +1,4 @@
-export type ProviderId = "codex" | "claude" | "copilot";
+export type ProviderId = "codex" | "claude" | "copilot" | "cursor";
 
 export type QuotaStatus = "ok" | "warning" | "critical" | "unknown";
 

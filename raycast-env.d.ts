@@ -21,12 +21,16 @@ declare namespace Preferences {
   "claudeAccessToken"?: string,
   /** Copilot API Token (Optional) - Optional manual token. You can also use device login from the command actions. */
   "copilotApiToken"?: string,
+  /** Cursor Cookie Header (Optional) - Optional cookie header for Cursor web API (from an active cursor.com session). */
+  "cursorCookieHeader"?: string,
   /** Codex Usage URL - Usage page opened by the Codex action. */
   "codexUsageUrl": string,
   /** Claude Usage URL - Usage page opened by the Claude action. */
   "claudeUsageUrl": string,
   /** Copilot Usage URL - Usage page opened by the Copilot action. */
-  "copilotUsageUrl": string
+  "copilotUsageUrl": string,
+  /** Cursor Usage URL - Usage page opened by the Cursor action. */
+  "cursorUsageUrl": string
 }
 }
 

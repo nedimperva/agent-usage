@@ -30,6 +30,23 @@ interface CodexUsageResponse {
   };
 }
 
+function formatWindowSpan(windowSeconds?: number): string | undefined {
+  if (windowSeconds === undefined || !Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+    return undefined;
+  }
+
+  if (windowSeconds <= 5 * 60 * 60) {
+    return "5h window";
+  }
+
+  if (windowSeconds >= 6 * 24 * 60 * 60) {
+    return "7d window";
+  }
+
+  const totalHours = Math.round(windowSeconds / 3600);
+  return `${totalHours}h window`;
+}
+
 function stripQuotes(value: string): string {
   const trimmed = value.trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
@@ -156,16 +173,18 @@ function buildWindowQuota(
     return undefined;
   }
 
-  const remainingPercent = Math.max(0, Math.min(100, 100 - usedPercent));
+  const normalizedUsedPercent = Math.max(0, Math.min(100, usedPercent));
+  const remainingPercent = Math.max(0, Math.min(100, 100 - normalizedUsedPercent));
   const resetSeconds = parseOptionalNumber(window.reset_at);
   const resetAt = resetSeconds !== undefined ? new Date(resetSeconds * 1000).toISOString() : undefined;
-  const windowMinutes = parseOptionalNumber(window.limit_window_seconds);
+  const windowSeconds = parseOptionalNumber(window.limit_window_seconds);
+  const windowSpan = formatWindowSpan(windowSeconds);
 
   let label = fallbackLabel;
-  if (windowMinutes !== undefined) {
-    if (windowMinutes <= 5 * 60 * 60) {
+  if (windowSeconds !== undefined) {
+    if (windowSeconds <= 5 * 60 * 60) {
       label = "5 Hour Limit";
-    } else if (windowMinutes >= 6 * 24 * 60 * 60) {
+    } else if (windowSeconds >= 6 * 24 * 60 * 60) {
       label = "Weekly Limit";
     }
   }
@@ -174,8 +193,11 @@ function buildWindowQuota(
     id: fallbackId,
     label,
     remainingPercent,
-    remainingDisplay: `${formatPercent(remainingPercent)} left`,
+    remainingDisplay: `${formatPercent(remainingPercent)} left (${formatPercent(normalizedUsedPercent)} used${
+      windowSpan ? `, ${windowSpan}` : ""
+    })`,
     resetAt,
+    trendBadge: `${formatPercent(normalizedUsedPercent)} used`,
     status: statusFromRemainingPercent(remainingPercent),
   };
 }
@@ -192,13 +214,29 @@ export function mapCodexUsageToQuotas(payload: CodexUsageResponse): QuotaItem[] 
     quotas.push(secondary);
   }
 
-  const balance = parseOptionalNumber(payload.credits?.balance);
   const hasCredits = payload.credits?.has_credits === true;
-  if (hasCredits && balance !== undefined) {
+  const hasUnlimitedCredits = payload.credits?.unlimited === true;
+  const balance = parseOptionalNumber(payload.credits?.balance);
+
+  if (hasUnlimitedCredits) {
+    quotas.push({
+      id: "codex-credits",
+      label: "Credits",
+      remainingDisplay: "Unlimited",
+      status: "ok",
+    });
+  } else if (hasCredits && balance !== undefined) {
     quotas.push({
       id: "codex-credits",
       label: "Credits",
       remainingDisplay: `${balance.toFixed(2)} remaining`,
+      status: "unknown",
+    });
+  } else if (hasCredits) {
+    quotas.push({
+      id: "codex-credits",
+      label: "Credits",
+      remainingDisplay: "Available (balance not provided)",
       status: "unknown",
     });
   }

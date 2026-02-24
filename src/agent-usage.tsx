@@ -30,6 +30,7 @@ import { ProviderId, ProviderUsageSnapshot } from "./models/usage";
 import { fetchClaudeSnapshot } from "./providers/claude";
 import { fetchCodexSnapshot } from "./providers/codex";
 import { fetchCopilotSnapshot, pollCopilotDeviceToken, requestCopilotDeviceCode } from "./providers/copilot";
+import { fetchCursorSnapshot } from "./providers/cursor";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
 const COPILOT_DEVICE_PENDING_KEY = "agent-usage.copilot.device-pending.v1";
@@ -38,9 +39,11 @@ interface Preferences {
   codexAuthToken?: string;
   claudeAccessToken?: string;
   copilotApiToken?: string;
+  cursorCookieHeader?: string;
   codexUsageUrl?: string;
   claudeUsageUrl?: string;
   copilotUsageUrl?: string;
+  cursorUsageUrl?: string;
 }
 
 interface CopilotTokenFormValues {
@@ -55,6 +58,7 @@ const PROVIDER_TITLES: Record<ProviderId, string> = {
   codex: "Codex",
   claude: "Claude",
   copilot: "GitHub Copilot",
+  cursor: "Cursor",
 };
 
 function buildFallbackSnapshot(provider: ProviderId, reason: string): ProviderUsageSnapshot {
@@ -80,6 +84,10 @@ function providerUrl(provider: ProviderId, preferences: Preferences): string {
 
   if (provider === "claude") {
     return preferences.claudeUsageUrl?.trim() || "https://claude.ai/settings/usage";
+  }
+
+  if (provider === "cursor") {
+    return preferences.cursorUsageUrl?.trim() || "https://cursor.com/dashboard";
   }
 
   return preferences.copilotUsageUrl?.trim() || "https://github.com/settings/copilot";
@@ -179,6 +187,10 @@ export default function Command() {
         return fetchClaudeSnapshot(preferences.claudeAccessToken);
       }
 
+      if (provider === "cursor") {
+        return fetchCursorSnapshot(preferences.cursorCookieHeader);
+      }
+
       const copilotToken = resolveCopilotToken();
       if (!copilotToken) {
         const pending = pendingCopilotLogin;
@@ -198,6 +210,7 @@ export default function Command() {
       pendingCopilotLogin,
       preferences.claudeAccessToken,
       preferences.codexAuthToken,
+      preferences.cursorCookieHeader,
       resolveCopilotToken,
     ],
   );
@@ -433,6 +446,13 @@ export default function Command() {
         return buildFallbackSnapshot("claude", "Run `claude login` then refresh, or set Claude OAuth token.");
       }
 
+      if (providerId === "cursor") {
+        return buildFallbackSnapshot(
+          "cursor",
+          "Set Cursor Cookie Header in extension preferences from a valid cursor.com session.",
+        );
+      }
+
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
   }, [snapshots]);
@@ -458,6 +478,16 @@ export default function Command() {
         await showToast({
           title: "Claude auth repair",
           message: "Copied `claude login`. Run it in terminal, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "cursor") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "Cursor auth repair",
+          message: "Set Cursor Cookie Header from an active cursor.com session, then refresh.",
           style: Toast.Style.Success,
         });
         return;

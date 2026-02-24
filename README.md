@@ -1,10 +1,10 @@
 # Agent Usage (Raycast)
 
-Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Raycast command.
+Track Codex, Claude, Cursor, and GitHub Copilot usage limits and reset windows in one Raycast command.
 
 ## Features
 
-- Unified dashboard with one-row provider summaries for Codex, Claude, and Copilot.
+- Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, and Copilot.
 - Provider drilldown views with quota details, inline issues, and provider-scoped actions.
 - Progress rings based on real remaining percentage.
 - Copilot device login flow inside the command.
@@ -14,6 +14,9 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 
 - Codex: ChatGPT usage endpoint (`/backend-api/wham/usage`) with your existing Codex login session.
 - Claude: OAuth usage endpoint (`https://api.anthropic.com/api/oauth/usage`) with your existing Claude login session.
+  - Includes 5h/weekly windows, model-specific windows, OAuth-app weekly window, and extra-usage budget (when present).
+- Cursor: web usage endpoints (`https://cursor.com/api/usage-summary`, `https://cursor.com/api/auth/me`) with your Cursor cookie header.
+  - Includes included-plan budget, on-demand budget, team on-demand (if present), and legacy request limits (if present).
 - Copilot: GitHub Copilot endpoint (`https://api.github.com/copilot_internal/user`) with device flow or token auth.
   - If reset timestamps are missing in the response, Copilot resets default to the next first-of-month boundary.
 
@@ -43,6 +46,8 @@ Track Codex, Claude, and GitHub Copilot usage limits and reset windows in one Ra
 3. Copilot
    - Recommended: `Start Copilot Device Login` then `Complete Copilot Device Login`
    - Optional: set `Copilot API Token` in extension preferences
+4. Cursor
+   - Set `Cursor Cookie Header` in extension preferences from an authenticated `cursor.com` request
 
 ## Store publishing checklist
 
@@ -60,7 +65,8 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
    - `npm run typecheck`
    - `npm run dev`
 2. If Codex or Claude is unavailable, refresh login with `codex login` or `claude login`, then refresh the dashboard.
-3. If Copilot is unavailable, use device login again or set a fresh token.
+3. If Cursor is unavailable, update `Cursor Cookie Header` in preferences from a fresh `cursor.com` session.
+4. If Copilot is unavailable, use device login again or set a fresh token.
 
 ## Known limitations
 

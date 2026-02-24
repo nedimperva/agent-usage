@@ -25,5 +25,26 @@ describe("mapCodexUsageToQuotas", () => {
     expect(quotas.some((quota) => quota.label === "5 Hour Limit")).toBe(true);
     expect(quotas.some((quota) => quota.label === "Weekly Limit")).toBe(true);
     expect(quotas.some((quota) => quota.id === "codex-credits")).toBe(true);
+    expect(quotas.find((quota) => quota.id === "codex-primary-limit")?.remainingDisplay).toContain("used");
+  });
+
+  it("maps unlimited credits when present", () => {
+    const quotas = mapCodexUsageToQuotas({
+      rate_limit: {
+        primary_window: {
+          used_percent: 10,
+          reset_at: 1771804800,
+          limit_window_seconds: 5 * 60 * 60,
+        },
+      },
+      credits: {
+        has_credits: true,
+        unlimited: true,
+      },
+    });
+
+    const credits = quotas.find((quota) => quota.id === "codex-credits");
+    expect(credits?.remainingDisplay).toContain("Unlimited");
+    expect(credits?.status).toBe("ok");
   });
 });

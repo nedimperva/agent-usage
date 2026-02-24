@@ -19,12 +19,15 @@ interface ClaudeOAuthUsageWindow {
 interface ClaudeOAuthUsageResponse {
   five_hour?: ClaudeOAuthUsageWindow;
   seven_day?: ClaudeOAuthUsageWindow;
+  seven_day_oauth_apps?: ClaudeOAuthUsageWindow;
   seven_day_sonnet?: ClaudeOAuthUsageWindow;
   seven_day_opus?: ClaudeOAuthUsageWindow;
+  iguana_necktie?: ClaudeOAuthUsageWindow;
   extra_usage?: {
     is_enabled?: unknown;
     used_credits?: unknown;
     monthly_limit?: unknown;
+    utilization?: unknown;
     currency?: unknown;
   };
 }
@@ -159,19 +162,24 @@ function toQuotaFromWindow(
   label: string,
   id: string,
 ): QuotaItem | undefined {
-  const utilization = parseOptionalNumber(window?.utilization);
-  if (utilization === undefined) {
+  const rawUtilization = parseOptionalNumber(window?.utilization);
+  if (rawUtilization === undefined) {
     return undefined;
   }
 
-  const remainingPercent = Math.max(0, Math.min(100, 100 - utilization));
+  const usedPercent = rawUtilization <= 1 ? rawUtilization * 100 : rawUtilization;
+  const normalizedUsedPercent = Math.max(0, Math.min(100, usedPercent));
+  const remainingPercent = Math.max(0, Math.min(100, 100 - normalizedUsedPercent));
   const resetAt = parseDateLike(window?.resets_at);
   return {
     id,
     label,
     remainingPercent,
-    remainingDisplay: `${remainingPercent.toFixed(1).replace(/\.0$/, "")}% left`,
+    remainingDisplay: `${remainingPercent.toFixed(1).replace(/\.0$/, "")}% left (${normalizedUsedPercent
+      .toFixed(1)
+      .replace(/\.0$/, "")}% used)`,
     resetAt,
+    trendBadge: `${normalizedUsedPercent.toFixed(1).replace(/\.0$/, "")}% used`,
     status: statusFromRemainingPercent(remainingPercent),
   };
 }
@@ -180,9 +188,10 @@ export function mapClaudeUsageToQuotas(payload: ClaudeOAuthUsageResponse): Quota
   const quotas: QuotaItem[] = [];
   const primary = toQuotaFromWindow(payload.five_hour, "5 Hour Limit", "claude-five-hour");
   const weekly = toQuotaFromWindow(payload.seven_day, "Weekly Limit", "claude-weekly");
-  const sonnet =
-    toQuotaFromWindow(payload.seven_day_sonnet, "Sonnet Weekly", "claude-sonnet-weekly") ??
-    toQuotaFromWindow(payload.seven_day_opus, "Opus Weekly", "claude-opus-weekly");
+  const oauthApps = toQuotaFromWindow(payload.seven_day_oauth_apps, "OAuth Apps Weekly", "claude-oauth-apps-weekly");
+  const sonnet = toQuotaFromWindow(payload.seven_day_sonnet, "Sonnet Weekly", "claude-sonnet-weekly");
+  const opus = toQuotaFromWindow(payload.seven_day_opus, "Opus Weekly", "claude-opus-weekly");
+  const iguana = toQuotaFromWindow(payload.iguana_necktie, "Iguana Necktie", "claude-iguana-necktie");
 
   if (primary) {
     quotas.push(primary);
@@ -190,14 +199,24 @@ export function mapClaudeUsageToQuotas(payload: ClaudeOAuthUsageResponse): Quota
   if (weekly) {
     quotas.push(weekly);
   }
+  if (oauthApps) {
+    quotas.push(oauthApps);
+  }
   if (sonnet) {
     quotas.push(sonnet);
+  }
+  if (opus) {
+    quotas.push(opus);
+  }
+  if (iguana) {
+    quotas.push(iguana);
   }
 
   const extra = payload.extra_usage;
   const enabled = extra?.is_enabled === true;
   const usedCredits = parseOptionalNumber(extra?.used_credits);
   const monthlyLimit = parseOptionalNumber(extra?.monthly_limit);
+  const utilization = parseOptionalNumber(extra?.utilization);
 
   if (enabled && usedCredits !== undefined && monthlyLimit !== undefined && monthlyLimit > 0) {
     const currency = safeString(extra?.currency) ?? "USD";
@@ -205,12 +224,26 @@ export function mapClaudeUsageToQuotas(payload: ClaudeOAuthUsageResponse): Quota
     const limitMajor = monthlyLimit / 100;
     const remainingMajor = Math.max(0, limitMajor - usedMajor);
     const remainingPercent = (remainingMajor / limitMajor) * 100;
+    const usedPercent = Math.max(0, Math.min(100, (usedMajor / limitMajor) * 100));
 
     quotas.push({
       id: "claude-extra-usage",
       label: "Extra Usage Budget",
       remainingPercent,
-      remainingDisplay: `${currency} ${remainingMajor.toFixed(2)} left`,
+      remainingDisplay: `${currency} ${remainingMajor.toFixed(2)} left of ${currency} ${limitMajor.toFixed(2)}`,
+      trendBadge: `${usedPercent.toFixed(1).replace(/\.0$/, "")}% used`,
+      status: statusFromRemainingPercent(remainingPercent),
+    });
+  } else if (enabled && utilization !== undefined) {
+    const usedPercent = utilization <= 1 ? utilization * 100 : utilization;
+    const normalizedUsed = Math.max(0, Math.min(100, usedPercent));
+    const remainingPercent = Math.max(0, Math.min(100, 100 - normalizedUsed));
+    quotas.push({
+      id: "claude-extra-usage",
+      label: "Extra Usage Budget",
+      remainingPercent,
+      remainingDisplay: `${remainingPercent.toFixed(1).replace(/\.0$/, "")}% left`,
+      trendBadge: `${normalizedUsed.toFixed(1).replace(/\.0$/, "")}% used`,
       status: statusFromRemainingPercent(remainingPercent),
     });
   }
