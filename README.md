@@ -5,10 +5,14 @@ Track Codex, Claude, Cursor, and GitHub Copilot usage limits and reset windows i
 ## Features
 
 - Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, and Copilot.
-- Provider drilldown views with quota details, inline issues, and provider-scoped actions.
+- Provider drilldown views with quota details, inline issues, provider-scoped actions, and richer provider metadata.
 - Progress rings based on real remaining percentage.
 - Copilot device login flow inside the command.
 - Quick auth-repair actions from provider rows and detail views.
+- Quota history trends per limit (sparkline + 24h/7d deltas).
+- Staleness detection and freshness indicators for provider snapshots.
+- Redacted debug snapshot copy action (tokens/cookies/secrets removed).
+- Local usage-cost scanning for Codex and Claude CLI logs (best-effort summary).
 
 ## Data sources
 
@@ -47,7 +51,11 @@ Track Codex, Claude, Cursor, and GitHub Copilot usage limits and reset windows i
    - Recommended: `Start Copilot Device Login` then `Complete Copilot Device Login`
    - Optional: set `Copilot API Token` in extension preferences
 4. Cursor
-   - Set `Cursor Cookie Header` in extension preferences from an authenticated `cursor.com` request
+   - Set `Cursor Cookie Header` in extension preferences from an authenticated `cursor.com` request.
+   - Accepted formats:
+     - Full copied request headers (the extension extracts `Cookie:` automatically)
+     - `Cookie: key=value; key2=value2`
+     - Raw cookie string (`key=value; key2=value2`)
 
 ## Store publishing checklist
 
@@ -72,3 +80,4 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
 
 - Provider endpoints can change.
 - Some provider reset timestamps can be missing or approximate (Copilot uses first-of-month fallback when absent).
+- Local cost scanning is best-effort and depends on locally available CLI log files.

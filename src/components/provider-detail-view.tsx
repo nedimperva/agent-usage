@@ -4,6 +4,7 @@ import { formatRelativeTimestamp } from "../lib/date";
 import { summarizeProviderSnapshot } from "../lib/dashboard";
 import { quotaAccessories, quotaProgressIcon, statusIcon } from "../lib/format";
 import { ProviderUsageSnapshot } from "../models/usage";
+import { summarizeQuotaHistory } from "../lib/history";
 
 export interface PendingCopilotDeviceLogin {
   deviceCode: string;
@@ -32,6 +33,34 @@ export function ProviderDetailView({
   renderActions,
 }: ProviderDetailViewProps) {
   const summary = summarizeProviderSnapshot(snapshot);
+  const staleStatus =
+    snapshot.staleAfterSeconds !== undefined
+      ? (() => {
+          const fetchedAtMs = Date.parse(snapshot.fetchedAt);
+          if (Number.isNaN(fetchedAtMs)) {
+            return "unknown";
+          }
+          const stale = Date.now() - fetchedAtMs > snapshot.staleAfterSeconds * 1000;
+          return stale ? "Stale" : "Fresh";
+        })()
+      : undefined;
+  const historyByQuotaId = new Map((snapshot.quotaHistory ?? []).map((series) => [series.quotaId, series]));
+  const rawPayloadSummary = (() => {
+    const raw = snapshot.rawPayload;
+    if (raw === undefined) {
+      return undefined;
+    }
+    if (raw === null) {
+      return "null";
+    }
+    if (Array.isArray(raw)) {
+      return `Array (${raw.length} items)`;
+    }
+    if (typeof raw === "object") {
+      return `Object (${Object.keys(raw as Record<string, unknown>).length} keys)`;
+    }
+    return typeof raw;
+  })();
 
   return (
     <List isLoading={isRefreshing} searchBarPlaceholder={`Search ${summary.title} quotas...`}>
@@ -39,10 +68,44 @@ export function ProviderDetailView({
         <List.Item
           icon={statusIcon(summary.status)}
           title={summary.title}
-          subtitle={summary.subtitle}
+          subtitle={`${summary.subtitle}${staleStatus ? ` Data freshness: ${staleStatus}.` : ""}`}
           actions={renderActions(snapshot)}
         />
       </List.Section>
+      {snapshot.metadataSections?.map((section) => (
+        <List.Section key={section.id} title={section.title}>
+          {section.items.map((item, index) => (
+            <List.Item
+              key={`${section.id}-${index}`}
+              icon={Icon.Dot}
+              title={item.label}
+              subtitle={item.value}
+              accessories={item.subtitle ? [{ text: item.subtitle }] : undefined}
+              actions={renderActions(snapshot)}
+            />
+          ))}
+        </List.Section>
+      ))}
+      {snapshot.resetPolicy && (
+        <List.Section title="Reset Policy">
+          <List.Item
+            icon={Icon.ArrowClockwise}
+            title="Policy"
+            subtitle={snapshot.resetPolicy}
+            actions={renderActions(snapshot)}
+          />
+        </List.Section>
+      )}
+      {rawPayloadSummary && (
+        <List.Section title="Raw Payload">
+          <List.Item
+            icon={Icon.Document}
+            title="Payload Captured"
+            subtitle={`${rawPayloadSummary}. Use “Copy ... Debug Bundle” to export a redacted payload.`}
+            actions={renderActions(snapshot)}
+          />
+        </List.Section>
+      )}
       <List.Section title="Quotas" subtitle={`${snapshot.quotas.length} tracked`}>
         {snapshot.quotas.map((quota) => (
           <List.Item
@@ -55,6 +118,35 @@ export function ProviderDetailView({
           />
         ))}
       </List.Section>
+      {snapshot.quotas.length > 0 && (
+        <List.Section title="History">
+          {snapshot.quotas.map((quota) => {
+            const history = historyByQuotaId.get(quota.id);
+            const summaryHistory = history ? summarizeQuotaHistory(history) : undefined;
+            const deltaParts = [
+              summaryHistory?.delta24h !== undefined
+                ? `24h ${summaryHistory.delta24h > 0 ? "+" : ""}${summaryHistory.delta24h.toFixed(1)}%`
+                : undefined,
+              summaryHistory?.delta7d !== undefined
+                ? `7d ${summaryHistory.delta7d > 0 ? "+" : ""}${summaryHistory.delta7d.toFixed(1)}%`
+                : undefined,
+            ]
+              .filter((part): part is string => !!part)
+              .join(" | ");
+
+            return (
+              <List.Item
+                key={`${snapshot.provider}-history-${quota.id}`}
+                icon={Icon.LineChart}
+                title={quota.label}
+                subtitle={summaryHistory?.sparkline || "No trend data yet"}
+                accessories={deltaParts ? [{ text: deltaParts }] : undefined}
+                actions={renderActions(snapshot)}
+              />
+            );
+          })}
+        </List.Section>
+      )}
       {issues.length > 0 && (
         <List.Section title="Issues" subtitle={`${issues.length} active`}>
           {issues.map((issue, index) => (

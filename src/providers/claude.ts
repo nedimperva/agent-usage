@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
+import { scanLocalCostSummary } from "../lib/cost";
 import { parseDateLike, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
 
 const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -9,6 +10,10 @@ const CLAUDE_OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 interface ClaudeCredentials {
   accessToken: string;
   rateLimitTier?: string;
+  accountEmail?: string;
+  scopes?: string[];
+  expiresAt?: string;
+  sourcePath?: string;
 }
 
 interface ClaudeOAuthUsageWindow {
@@ -104,12 +109,12 @@ function resolveCredentialPaths(): string[] {
   ]);
 }
 
-async function readFirstCredentialsFile(): Promise<unknown> {
+async function readFirstCredentialsFile(): Promise<{ parsed: unknown; path: string }> {
   const candidates = resolveCredentialPaths();
   for (const candidate of candidates) {
     try {
       const raw = await fs.readFile(candidate, "utf8");
-      return JSON.parse(raw);
+      return { parsed: JSON.parse(raw), path: candidate };
     } catch {
       continue;
     }
@@ -124,19 +129,56 @@ async function loadClaudeCredentials(manualToken?: string): Promise<ClaudeCreden
     return {
       accessToken: directToken.replace(/^Bearer\s+/i, ""),
       rateLimitTier: undefined,
+      sourcePath: "manual preference",
     };
   }
 
-  const parsed = await readFirstCredentialsFile();
+  const { parsed, path: sourcePath } = await readFirstCredentialsFile();
   const accessToken = deepFindString(parsed, ["accessToken", "access_token", "token"]);
   if (!accessToken) {
     throw new Error("Claude credentials found, but no OAuth access token was present.");
   }
 
   const rateLimitTier = deepFindString(parsed, ["rateLimitTier", "rate_limit_tier"]);
+  const accountEmail = deepFindString(parsed, ["email", "accountEmail", "account_email"]);
+  const rawExpiresAt = deepFindString(parsed, ["expiresAt", "expires_at", "expiration", "expiry"]);
+  const expiresAt = parseDateLike(rawExpiresAt) ?? rawExpiresAt;
+
+  const scopes = (() => {
+    const queue: unknown[] = [parsed];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (typeof current !== "object" || current === null) {
+        continue;
+      }
+      if (Array.isArray(current)) {
+        const asStrings = current.map((value) => safeString(value)).filter((value): value is string => !!value);
+        if (asStrings.length > 0 && asStrings.some((scope) => scope.includes(":"))) {
+          return asStrings;
+        }
+        queue.push(...current);
+        continue;
+      }
+      const record = current as Record<string, unknown>;
+      const maybeScopes = record.scopes;
+      if (Array.isArray(maybeScopes)) {
+        const values = maybeScopes.map((value) => safeString(value)).filter((value): value is string => !!value);
+        if (values.length > 0) {
+          return values;
+        }
+      }
+      queue.push(...Object.values(record));
+    }
+    return undefined;
+  })();
+
   return {
     accessToken,
     rateLimitTier,
+    accountEmail,
+    scopes,
+    expiresAt,
+    sourcePath,
   };
 }
 
@@ -280,11 +322,72 @@ export async function fetchClaudeSnapshot(manualAccessToken?: string): Promise<P
     throw new Error("Claude usage API returned no parseable usage windows.");
   }
 
+  const configRoots = splitConfigDirs(process.env.CLAUDE_CONFIG_DIR);
+  const claudeProjectRoots = [
+    ...configRoots.map((root) => path.join(root, "projects")),
+    path.join(os.homedir(), ".config", "claude", "projects"),
+    path.join(os.homedir(), ".claude", "projects"),
+  ];
+  const localCost = await scanLocalCostSummary({
+    roots: claudeProjectRoots,
+    maxFiles: 150,
+    maxAgeDays: 30,
+  });
+
+  const hasUserProfileScope = credentials.scopes?.includes("user:profile") ?? false;
+
   return {
     provider: "claude",
     planLabel: toPlanLabel(credentials.rateLimitTier),
     fetchedAt: new Date().toISOString(),
     quotas,
     source: "api",
+    metadataSections: [
+      {
+        id: "account",
+        title: "Account",
+        items: [
+          { label: "Plan", value: toPlanLabel(credentials.rateLimitTier) },
+          { label: "Email", value: credentials.accountEmail ?? "unknown" },
+          { label: "Tier raw", value: credentials.rateLimitTier ?? "unknown" },
+        ],
+      },
+      {
+        id: "source",
+        title: "Source",
+        items: [
+          { label: "Source", value: "OAuth API" },
+          { label: "Endpoint", value: CLAUDE_OAUTH_USAGE_URL },
+          { label: "Credential source", value: credentials.sourcePath ?? "unknown" },
+          { label: "Beta header", value: "oauth-2025-04-20" },
+        ],
+      },
+      {
+        id: "auth",
+        title: "Auth",
+        items: [
+          { label: "Has user:profile scope", value: hasUserProfileScope ? "yes" : "no" },
+          { label: "Scopes", value: credentials.scopes?.join(", ") ?? "unknown" },
+          { label: "Token expiry", value: credentials.expiresAt ?? "unknown" },
+        ],
+      },
+      {
+        id: "cost",
+        title: "Local Cost (30d)",
+        items: localCost
+          ? [
+              { label: "Files scanned", value: `${localCost.filesScanned}` },
+              { label: "Records scanned", value: `${localCost.recordsScanned}` },
+              { label: "Input tokens", value: `${localCost.inputTokens}` },
+              { label: "Output tokens", value: `${localCost.outputTokens}` },
+              { label: "Cached tokens", value: `${localCost.cachedTokens}` },
+              { label: "USD cost", value: `${localCost.usdCost.toFixed(4)}` },
+            ]
+          : [{ label: "Local cost scan", value: "No recent local JSONL usage files found" }],
+      },
+    ],
+    rawPayload: payload,
+    staleAfterSeconds: 4 * 60 * 60,
+    resetPolicy: "Resets come from `*_window.resets_at` values in `/api/oauth/usage`.",
   };
 }

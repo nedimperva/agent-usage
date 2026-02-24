@@ -40,6 +40,12 @@ interface CopilotInternalResponse {
   };
 }
 
+export interface CopilotSnapshotContext {
+  tokenSource?: string;
+  lastSuccessAt?: string;
+  recentDeviceEvents?: string[];
+}
+
 function normalizePercent(value: number | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -225,7 +231,10 @@ export async function pollCopilotDeviceToken(device: CopilotDeviceCodeResponse):
   throw new Error("Timed out waiting for GitHub device authorization.");
 }
 
-export async function fetchCopilotSnapshot(token: string): Promise<ProviderUsageSnapshot> {
+export async function fetchCopilotSnapshot(
+  token: string,
+  context: CopilotSnapshotContext = {},
+): Promise<ProviderUsageSnapshot> {
   const trimmedToken = token.trim();
   if (!trimmedToken) {
     throw new Error("Copilot token is missing.");
@@ -253,11 +262,40 @@ export async function fetchCopilotSnapshot(token: string): Promise<ProviderUsage
 
   const payload = (await response.json()) as CopilotInternalResponse;
   const planLabel = safeString(payload.copilotPlan) ?? safeString(payload.copilot_plan) ?? "Account";
+  const payloadKeys = Object.keys(payload as Record<string, unknown>);
   return {
     provider: "copilot",
     planLabel,
     fetchedAt: new Date().toISOString(),
     quotas: extractCopilotQuotaItems(payload),
     source: "api",
+    metadataSections: [
+      {
+        id: "auth",
+        title: "Auth",
+        items: [
+          { label: "Token source", value: context.tokenSource ?? "unknown" },
+          { label: "Last successful refresh", value: context.lastSuccessAt ?? "unknown" },
+          { label: "Recent device events", value: context.recentDeviceEvents?.join(" | ") ?? "none" },
+        ],
+      },
+      {
+        id: "source",
+        title: "Source",
+        items: [
+          { label: "Source", value: "GitHub Copilot internal API" },
+          { label: "Endpoint", value: `${GITHUB_BASE_URL}/copilot_internal/user` },
+          { label: "Payload keys", value: payloadKeys.join(", ") || "none" },
+        ],
+      },
+      {
+        id: "policy",
+        title: "Reset Policy",
+        items: [{ label: "Rule", value: "When reset timestamp is absent, fallback uses next UTC month boundary." }],
+      },
+    ],
+    rawPayload: payload,
+    staleAfterSeconds: 2 * 60 * 60,
+    resetPolicy: "Fallback reset boundary: first day of next UTC month when API reset is missing.",
   };
 }

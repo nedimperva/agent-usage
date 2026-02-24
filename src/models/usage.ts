@@ -4,6 +4,28 @@ export type QuotaStatus = "ok" | "warning" | "critical" | "unknown";
 
 export type SnapshotSource = "api" | "manual";
 
+export interface SnapshotSectionItem {
+  label: string;
+  value: string;
+  subtitle?: string;
+}
+
+export interface SnapshotSection {
+  id: string;
+  title: string;
+  items: SnapshotSectionItem[];
+}
+
+export interface QuotaHistoryPoint {
+  at: string;
+  remainingPercent: number;
+}
+
+export interface QuotaHistorySeries {
+  quotaId: string;
+  points: QuotaHistoryPoint[];
+}
+
 export interface QuotaItem {
   id: string;
   label: string;
@@ -21,6 +43,11 @@ export interface ProviderUsageSnapshot {
   quotas: QuotaItem[];
   source: SnapshotSource;
   errors?: string[];
+  metadataSections?: SnapshotSection[];
+  quotaHistory?: QuotaHistorySeries[];
+  rawPayload?: unknown;
+  staleAfterSeconds?: number;
+  resetPolicy?: string;
 }
 
 export interface DashboardState {

@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
+import { scanLocalCostSummary } from "../lib/cost";
 import { formatPercent, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
 
 const DEFAULT_CHATGPT_BASE_URL = "https://chatgpt.com/backend-api";
@@ -9,6 +10,8 @@ const DEFAULT_CHATGPT_BASE_URL = "https://chatgpt.com/backend-api";
 interface CodexCredentials {
   accessToken: string;
   accountId?: string;
+  accountEmail?: string;
+  authPath?: string;
 }
 
 interface CodexUsageWindow {
@@ -133,6 +136,7 @@ async function loadCodexCredentials(manualToken?: string): Promise<CodexCredenti
   if (manual) {
     return {
       accessToken: manual.replace(/^Bearer\s+/i, ""),
+      authPath: "manual preference",
     };
   }
 
@@ -156,7 +160,34 @@ async function loadCodexCredentials(manualToken?: string): Promise<CodexCredenti
   }
 
   const accountId = deepFindString(parsed, ["account_id", "accountId", "chatgpt_account_id"]);
-  return { accessToken, accountId };
+  const accountEmail = deepFindString(parsed, ["email", "account_email", "accountEmail"]);
+  return { accessToken, accountId, accountEmail, authPath };
+}
+
+function maskEmail(email?: string): string | undefined {
+  const value = email?.trim();
+  if (!value || !value.includes("@")) {
+    return undefined;
+  }
+  const [name, domain] = value.split("@");
+  if (!name || !domain) {
+    return undefined;
+  }
+  if (name.length <= 2) {
+    return `${name[0] ?? "*"}***@${domain}`;
+  }
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function maskId(value?: string): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.length <= 8) {
+    return "[hidden]";
+  }
+  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
 }
 
 function buildWindowQuota(
@@ -275,11 +306,60 @@ export async function fetchCodexSnapshot(manualToken?: string): Promise<Provider
     throw new Error("Codex usage API returned no parseable limits.");
   }
 
+  const localCost = await scanLocalCostSummary({
+    roots: [path.join(codexHome, "sessions"), path.join(codexHome, "archived_sessions")],
+    maxFiles: 150,
+    maxAgeDays: 30,
+  });
+
+  const accountItems = [
+    { label: "Plan", value: safeString(payload.plan_type) ?? "unknown" },
+    { label: "Email", value: maskEmail(credentials.accountEmail) ?? "unknown" },
+    { label: "Account ID", value: maskId(credentials.accountId) ?? "unknown" },
+  ];
+
+  const credits = payload.credits;
+  const creditsItems = [
+    { label: "Has credits", value: credits?.has_credits === true ? "yes" : "no" },
+    { label: "Unlimited", value: credits?.unlimited === true ? "yes" : "no" },
+    {
+      label: "Balance",
+      value: parseOptionalNumber(credits?.balance) !== undefined ? `${parseOptionalNumber(credits?.balance)}` : "n/a",
+    },
+  ];
+
+  const sourceItems = [
+    { label: "Source", value: "OAuth API" },
+    { label: "Endpoint", value: url },
+    { label: "Auth file", value: credentials.authPath ?? "unknown" },
+  ];
+
+  const costItems = localCost
+    ? [
+        { label: "Files scanned", value: `${localCost.filesScanned}` },
+        { label: "Records scanned", value: `${localCost.recordsScanned}` },
+        { label: "Input tokens", value: `${localCost.inputTokens}` },
+        { label: "Output tokens", value: `${localCost.outputTokens}` },
+        { label: "Cached tokens", value: `${localCost.cachedTokens}` },
+        { label: "USD cost", value: `${localCost.usdCost.toFixed(4)}` },
+      ]
+    : [{ label: "Local cost scan", value: "No recent local JSONL usage files found" }];
+
   return {
     provider: "codex",
     planLabel: safeString(payload.plan_type) ?? "OAuth",
     fetchedAt: new Date().toISOString(),
     quotas,
     source: "api",
+    metadataSections: [
+      { id: "account", title: "Account", items: accountItems },
+      { id: "source", title: "Source", items: sourceItems },
+      { id: "credits", title: "Credits", items: creditsItems },
+      { id: "web-extras", title: "Web Extras", items: [{ label: "Status", value: "Not enabled in API-only mode" }] },
+      { id: "cost", title: "Local Cost (30d)", items: costItems },
+    ],
+    rawPayload: payload,
+    staleAfterSeconds: 4 * 60 * 60,
+    resetPolicy: "Resets come from `rate_limit.*.reset_at` in `/wham/usage`.",
   };
 }

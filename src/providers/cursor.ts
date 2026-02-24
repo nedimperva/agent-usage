@@ -12,6 +12,14 @@ interface CursorUsageSummary {
   billing_cycle_end?: unknown;
   membershipType?: unknown;
   membership_type?: unknown;
+  limitType?: unknown;
+  limit_type?: unknown;
+  isUnlimited?: unknown;
+  is_unlimited?: unknown;
+  autoModelSelectedDisplayMessage?: unknown;
+  auto_model_selected_display_message?: unknown;
+  namedModelSelectedDisplayMessage?: unknown;
+  named_model_selected_display_message?: unknown;
   individualUsage?: {
     plan?: CursorMoneyUsage;
     onDemand?: CursorMoneyUsage;
@@ -123,6 +131,21 @@ function toMembershipLabel(value: unknown): string | undefined {
   }
 
   return raw[0].toUpperCase() + raw.slice(1);
+}
+
+function formatDaysRemaining(targetIso?: string): string {
+  if (!targetIso) {
+    return "unknown";
+  }
+  const target = Date.parse(targetIso);
+  if (Number.isNaN(target)) {
+    return "unknown";
+  }
+  const deltaDays = Math.ceil((target - Date.now()) / (24 * 60 * 60 * 1000));
+  if (deltaDays < 0) {
+    return "expired";
+  }
+  return `${deltaDays} days`;
 }
 
 function toMajorUnits(value: unknown): number | undefined {
@@ -293,10 +316,10 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
   }
 
   const user = await requestCursorJson<CursorUserInfo>("/api/auth/me", normalizedCookie, { allowUnauthorized: true });
-  const userId = safeString(user?.sub);
-  const legacyUsage = userId
+  const userIdForLegacy = safeString(user?.sub);
+  const legacyUsage = userIdForLegacy
     ? await requestCursorJson<CursorLegacyUsageResponse>(
-        `/api/usage?user=${encodeURIComponent(userId)}`,
+        `/api/usage?user=${encodeURIComponent(userIdForLegacy)}`,
         normalizedCookie,
         {
           allowUnauthorized: true,
@@ -307,6 +330,18 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
   const quotas = mapCursorUsageToQuotas(summary, legacyUsage);
   const planLabel = toMembershipLabel(summary.membershipType ?? summary.membership_type) ?? "Session";
   const email = safeString(user?.email);
+  const billingStart = parseDateLike(summary.billingCycleStart ?? summary.billing_cycle_start);
+  const billingEnd = parseDateLike(summary.billingCycleEnd ?? summary.billing_cycle_end);
+  const autoMessage = safeString(
+    summary.autoModelSelectedDisplayMessage ?? summary.auto_model_selected_display_message,
+  );
+  const namedMessage = safeString(
+    summary.namedModelSelectedDisplayMessage ?? summary.named_model_selected_display_message,
+  );
+  const membershipRaw = safeString(summary.membershipType ?? summary.membership_type);
+  const limitType = safeString(summary.limitType ?? summary.limit_type);
+  const isUnlimited = summary.isUnlimited === true || summary.is_unlimited === true;
+  const userId = safeString(user?.sub);
 
   return {
     provider: "cursor",
@@ -314,5 +349,60 @@ export async function fetchCursorSnapshot(cookieHeader?: string): Promise<Provid
     fetchedAt: new Date().toISOString(),
     quotas,
     source: "api",
+    metadataSections: [
+      {
+        id: "account",
+        title: "Account",
+        items: [
+          { label: "Plan", value: planLabel },
+          { label: "Membership raw", value: membershipRaw ?? "unknown" },
+          { label: "Email", value: email ?? "unknown" },
+          { label: "User ID", value: userId ? `${userId.slice(0, 4)}...${userId.slice(-4)}` : "unknown" },
+        ],
+      },
+      {
+        id: "source",
+        title: "Source",
+        items: [
+          { label: "Source", value: "Cursor web API" },
+          { label: "Primary endpoint", value: `${CURSOR_BASE_URL}/api/usage-summary` },
+          { label: "Auth endpoint", value: `${CURSOR_BASE_URL}/api/auth/me` },
+          { label: "Legacy endpoint", value: `${CURSOR_BASE_URL}/api/usage?user=<id>` },
+        ],
+      },
+      {
+        id: "billing",
+        title: "Billing",
+        items: [
+          { label: "Cycle start", value: billingStart ?? "unknown" },
+          { label: "Cycle end", value: billingEnd ?? "unknown" },
+          { label: "Days remaining", value: formatDaysRemaining(billingEnd) },
+          { label: "Reset policy", value: "Billing cycle end from usage-summary" },
+        ],
+      },
+      {
+        id: "policy",
+        title: "Policy",
+        items: [
+          { label: "Limit type", value: limitType ?? "unknown" },
+          { label: "Unlimited", value: isUnlimited ? "yes" : "no" },
+        ],
+      },
+      {
+        id: "model-behavior",
+        title: "Model Behavior",
+        items: [
+          { label: "Auto model message", value: autoMessage ?? "n/a" },
+          { label: "Named model message", value: namedMessage ?? "n/a" },
+        ],
+      },
+    ],
+    rawPayload: {
+      summary,
+      user,
+      legacyUsage,
+    },
+    staleAfterSeconds: 2 * 60 * 60,
+    resetPolicy: "Monthly reset at Cursor billing cycle end.",
   };
 }

@@ -25,6 +25,8 @@ import {
 } from "./lib/dashboard";
 import { formatRelativeTimestamp } from "./lib/date";
 import { statusIcon } from "./lib/format";
+import { mergeQuotaHistory } from "./lib/history";
+import { redactSensitive } from "./lib/redact";
 import { loadDashboardState, mapSnapshotsByProvider, saveDashboardState } from "./lib/storage";
 import { ProviderId, ProviderUsageSnapshot } from "./models/usage";
 import { fetchClaudeSnapshot } from "./providers/claude";
@@ -34,6 +36,8 @@ import { fetchCursorSnapshot } from "./providers/cursor";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
 const COPILOT_DEVICE_PENDING_KEY = "agent-usage.copilot.device-pending.v1";
+const COPILOT_LAST_SUCCESS_KEY = "agent-usage.copilot.last-success-at.v1";
+const COPILOT_DEVICE_EVENTS_KEY = "agent-usage.copilot.device-events.v1";
 
 interface Preferences {
   codexAuthToken?: string;
@@ -134,6 +138,8 @@ export default function Command() {
   const copilotTokenRef = useRef<string | undefined>(undefined);
   const [copilotTokenState, setCopilotTokenState] = useState<string | undefined>();
   const [pendingCopilotLogin, setPendingCopilotLogin] = useState<PendingCopilotDeviceLogin | undefined>();
+  const [copilotLastSuccessAt, setCopilotLastSuccessAt] = useState<string | undefined>();
+  const [copilotDeviceEvents, setCopilotDeviceEvents] = useState<string[]>([]);
 
   useEffect(() => {
     snapshotsRef.current = snapshots;
@@ -156,6 +162,16 @@ export default function Command() {
     await LocalStorage.removeItem(COPILOT_DEVICE_PENDING_KEY);
     setPendingCopilotLogin(undefined);
   }, []);
+
+  const appendCopilotDeviceEvent = useCallback(
+    async (event: string) => {
+      const timestamped = `${new Date().toISOString()}: ${event}`;
+      const next = [timestamped, ...copilotDeviceEvents].slice(0, 8);
+      setCopilotDeviceEvents(next);
+      await LocalStorage.setItem(COPILOT_DEVICE_EVENTS_KEY, JSON.stringify(next));
+    },
+    [copilotDeviceEvents],
+  );
 
   const persistSnapshots = useCallback(async (next: SnapshotMap, refreshAt?: string) => {
     const ordered = PROVIDER_ORDER.map((providerId) => next[providerId]).filter(
@@ -203,13 +219,21 @@ export default function Command() {
         throw new Error("No Copilot token configured. Start Copilot Device Login.");
       }
 
-      return fetchCopilotSnapshot(copilotToken);
+      const tokenSource = preferences.copilotApiToken?.trim() ? "preference" : "local storage";
+      return fetchCopilotSnapshot(copilotToken, {
+        tokenSource,
+        lastSuccessAt: copilotLastSuccessAt,
+        recentDeviceEvents: copilotDeviceEvents.slice(0, 3),
+      });
     },
     [
+      copilotDeviceEvents,
+      copilotLastSuccessAt,
       isPendingCopilotLoginExpired,
       pendingCopilotLogin,
       preferences.claudeAccessToken,
       preferences.codexAuthToken,
+      preferences.copilotApiToken,
       preferences.cursorCookieHeader,
       resolveCopilotToken,
     ],
@@ -231,11 +255,24 @@ export default function Command() {
           fetchProviderSnapshot,
           fallbackSnapshotForProvider,
         );
+        const mergedSnapshot: ProviderUsageSnapshot = {
+          ...result.snapshot,
+          quotaHistory: mergeQuotaHistory(snapshotsRef.current[provider], result.snapshot, result.refreshedAt),
+        };
+        const mergedSnapshots: SnapshotMap = {
+          ...result.snapshots,
+          [provider]: mergedSnapshot,
+        };
 
-        setSnapshots(result.snapshots);
-        snapshotsRef.current = result.snapshots;
+        setSnapshots(mergedSnapshots);
+        snapshotsRef.current = mergedSnapshots;
         setLastRefreshAt(result.refreshedAt);
-        await persistSnapshots(result.snapshots, result.refreshedAt);
+        await persistSnapshots(mergedSnapshots, result.refreshedAt);
+
+        if (provider === "copilot" && !result.failed) {
+          setCopilotLastSuccessAt(result.refreshedAt);
+          await LocalStorage.setItem(COPILOT_LAST_SUCCESS_KEY, result.refreshedAt);
+        }
 
         if (showSuccess) {
           await showToast({
@@ -263,11 +300,27 @@ export default function Command() {
           fetchProviderSnapshot,
           fallbackSnapshotForProvider,
         );
+        const mergedSnapshots: SnapshotMap = { ...result.snapshots };
+        for (const providerId of PROVIDER_ORDER) {
+          const candidate = result.snapshots[providerId];
+          if (!candidate) {
+            continue;
+          }
+          mergedSnapshots[providerId] = {
+            ...candidate,
+            quotaHistory: mergeQuotaHistory(snapshotsRef.current[providerId], candidate, result.refreshedAt),
+          };
+        }
 
-        setSnapshots(result.snapshots);
-        snapshotsRef.current = result.snapshots;
+        setSnapshots(mergedSnapshots);
+        snapshotsRef.current = mergedSnapshots;
         setLastRefreshAt(result.refreshedAt);
-        await persistSnapshots(result.snapshots, result.refreshedAt);
+        await persistSnapshots(mergedSnapshots, result.refreshedAt);
+
+        if (!result.failedProviders.includes("copilot")) {
+          setCopilotLastSuccessAt(result.refreshedAt);
+          await LocalStorage.setItem(COPILOT_LAST_SUCCESS_KEY, result.refreshedAt);
+        }
 
         if (showSuccess) {
           const failedCount = result.failedProviders.length;
@@ -325,6 +378,7 @@ export default function Command() {
     });
 
     try {
+      await appendCopilotDeviceEvent("Device flow started");
       const device = await requestCopilotDeviceCode();
       const pending: PendingCopilotDeviceLogin = {
         ...device,
@@ -340,12 +394,14 @@ export default function Command() {
       startingToast.style = Toast.Style.Success;
       startingToast.title = "Copilot code ready";
       startingToast.message = `Code ${pending.userCode} copied. Paste on GitHub page, then run Complete Copilot Device Login.`;
+      await appendCopilotDeviceEvent(`Device code issued (${pending.userCode})`);
     } catch (error) {
       startingToast.style = Toast.Style.Failure;
       startingToast.title = "Copilot login failed";
       startingToast.message = error instanceof Error ? error.message : "Unknown device flow error.";
+      await appendCopilotDeviceEvent("Device flow start failed");
     }
-  }, [refreshProvider]);
+  }, [appendCopilotDeviceEvent, refreshProvider]);
 
   const completeCopilotDeviceFlow = useCallback(async () => {
     const pending = pendingCopilotLogin;
@@ -355,6 +411,7 @@ export default function Command() {
         message: "Run Start Copilot Device Login first.",
         style: Toast.Style.Failure,
       });
+      await appendCopilotDeviceEvent("Device flow completion attempted without pending code");
       return;
     }
 
@@ -365,6 +422,7 @@ export default function Command() {
         message: "Start Copilot Device Login again.",
         style: Toast.Style.Failure,
       });
+      await appendCopilotDeviceEvent("Device code expired");
       await refreshProvider("copilot", false);
       return;
     }
@@ -384,21 +442,32 @@ export default function Command() {
       waitingToast.style = Toast.Style.Success;
       waitingToast.title = "Copilot connected";
       waitingToast.message = "Token saved and ready.";
+      await appendCopilotDeviceEvent("Device flow completed successfully");
       await refreshProvider("copilot", false);
     } catch (error) {
       waitingToast.style = Toast.Style.Failure;
       waitingToast.title = "Copilot login failed";
       waitingToast.message = error instanceof Error ? error.message : "Unknown device flow error.";
+      await appendCopilotDeviceEvent("Device flow completion failed");
     }
-  }, [clearPendingCopilotLogin, isPendingCopilotLoginExpired, pendingCopilotLogin, refreshProvider]);
+  }, [
+    appendCopilotDeviceEvent,
+    clearPendingCopilotLogin,
+    isPendingCopilotLoginExpired,
+    pendingCopilotLogin,
+    refreshProvider,
+  ]);
 
   useEffect(() => {
     async function hydrate() {
-      const [state, storedCopilotToken, storedPendingRaw] = await Promise.all([
-        loadDashboardState(),
-        LocalStorage.getItem<string>(COPILOT_TOKEN_STORAGE_KEY),
-        LocalStorage.getItem<string>(COPILOT_DEVICE_PENDING_KEY),
-      ]);
+      const [state, storedCopilotToken, storedPendingRaw, storedCopilotSuccess, storedCopilotEvents] =
+        await Promise.all([
+          loadDashboardState(),
+          LocalStorage.getItem<string>(COPILOT_TOKEN_STORAGE_KEY),
+          LocalStorage.getItem<string>(COPILOT_DEVICE_PENDING_KEY),
+          LocalStorage.getItem<string>(COPILOT_LAST_SUCCESS_KEY),
+          LocalStorage.getItem<string>(COPILOT_DEVICE_EVENTS_KEY),
+        ]);
 
       const normalizedStoredToken = storedCopilotToken?.trim();
       if (normalizedStoredToken) {
@@ -416,6 +485,19 @@ export default function Command() {
           }
         } catch {
           await LocalStorage.removeItem(COPILOT_DEVICE_PENDING_KEY);
+        }
+      }
+
+      if (storedCopilotSuccess) {
+        setCopilotLastSuccessAt(storedCopilotSuccess);
+      }
+
+      if (storedCopilotEvents) {
+        try {
+          const parsed = JSON.parse(storedCopilotEvents) as string[];
+          setCopilotDeviceEvents(Array.isArray(parsed) ? parsed : []);
+        } catch {
+          setCopilotDeviceEvents([]);
         }
       }
 
@@ -504,6 +586,11 @@ export default function Command() {
     [completeCopilotDeviceFlow, isPendingCopilotLoginExpired, pendingCopilotLogin, startCopilotDeviceFlow],
   );
 
+  const cancelCopilotDeviceFlow = useCallback(async () => {
+    await clearPendingCopilotLogin();
+    await appendCopilotDeviceEvent("Device flow cancelled");
+  }, [appendCopilotDeviceEvent, clearPendingCopilotLogin]);
+
   const pendingCopilotExpiresAt =
     pendingCopilotLogin && !isPendingCopilotLoginExpired(pendingCopilotLogin)
       ? new Date(Date.parse(pendingCopilotLogin.createdAt) + pendingCopilotLogin.expiresIn * 1000).toISOString()
@@ -523,6 +610,16 @@ export default function Command() {
 
       if (snapshot.errors?.length) {
         next.push(...snapshot.errors);
+      }
+
+      if (snapshot.staleAfterSeconds !== undefined) {
+        const fetchedAt = Date.parse(snapshot.fetchedAt);
+        if (!Number.isNaN(fetchedAt)) {
+          const staleMs = snapshot.staleAfterSeconds * 1000;
+          if (Date.now() - fetchedAt > staleMs) {
+            next.push(`Data is stale (older than ${Math.floor(snapshot.staleAfterSeconds / 60)} minutes).`);
+          }
+        }
       }
 
       issues[snapshot.provider] = next;
@@ -568,7 +665,7 @@ export default function Command() {
           <Action
             title="Cancel Copilot Device Login"
             icon={Icon.Trash}
-            onAction={() => void clearPendingCopilotLogin()}
+            onAction={() => void cancelCopilotDeviceFlow()}
           />
         )}
         {snapshot.provider === "copilot" && (
@@ -596,15 +693,15 @@ export default function Command() {
           url={providerUrl(snapshot.provider, preferences)}
         />
         <Action.CopyToClipboard
-          title={`Copy ${PROVIDER_TITLES[snapshot.provider]} Raw Snapshot`}
+          title={`Copy ${PROVIDER_TITLES[snapshot.provider]} Debug Bundle`}
           icon={Icon.Clipboard}
-          content={JSON.stringify(snapshot, null, 2)}
+          content={JSON.stringify(redactSensitive(snapshot), null, 2)}
         />
         <Action title="Open Extension Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
       </ActionPanel>
     ),
     [
-      clearPendingCopilotLogin,
+      cancelCopilotDeviceFlow,
       clearStoredCopilotToken,
       completeCopilotDeviceFlow,
       hasStoredCopilotToken,
