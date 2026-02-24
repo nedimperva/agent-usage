@@ -1,10 +1,10 @@
 import { Icon, List } from "@raycast/api";
 import { ReactElement } from "react";
+import { summarizeQuotaHistory } from "../lib/history";
 import { formatAbsoluteTimestamp, formatRelativeTimestamp } from "../lib/date";
 import { summarizeProviderSnapshot } from "../lib/dashboard";
 import { quotaAccessories, quotaProgressIcon, statusIcon } from "../lib/format";
 import { ProviderUsageSnapshot } from "../models/usage";
-import { summarizeQuotaHistory } from "../lib/history";
 
 export interface PendingCopilotDeviceLogin {
   deviceCode: string;
@@ -32,7 +32,15 @@ export function ProviderDetailView({
   pendingCopilotExpiresAt,
   renderActions,
 }: ProviderDetailViewProps) {
-  const hiddenMetadataSectionIds = new Set(["account", "auth", "source"]);
+  const hiddenMetadataSectionIds = new Set([
+    "account",
+    "auth",
+    "source",
+    "credits",
+    "web-extras",
+    "cost",
+    "local-cost",
+  ]);
   const summary = summarizeProviderSnapshot(snapshot);
   const staleStatus =
     snapshot.staleAfterSeconds !== undefined
@@ -49,6 +57,10 @@ export function ProviderDetailView({
   const visibleMetadataSections = (snapshot.metadataSections ?? []).filter(
     (section) => !hiddenMetadataSectionIds.has(section.id),
   );
+  const usageModeSection = visibleMetadataSections.find(
+    (section) => section.id === "usage-mode" || section.id === "model-behavior",
+  );
+  const metadataSectionsAfterTop = visibleMetadataSections.filter((section) => section.id !== usageModeSection?.id);
   const rawPayloadSummary = (() => {
     const raw = snapshot.rawPayload;
     if (raw === undefined) {
@@ -76,11 +88,12 @@ export function ProviderDetailView({
           actions={renderActions(snapshot)}
         />
       </List.Section>
-      {visibleMetadataSections.map((section) => (
-        <List.Section key={section.id} title={section.title}>
-          {section.items.map((item, index) => (
+
+      {usageModeSection && (
+        <List.Section key={usageModeSection.id} title={usageModeSection.title}>
+          {usageModeSection.items.map((item, index) => (
             <List.Item
-              key={`${section.id}-${index}`}
+              key={`${usageModeSection.id}-${index}`}
               icon={Icon.Dot}
               title={item.label}
               subtitle={item.value}
@@ -89,27 +102,8 @@ export function ProviderDetailView({
             />
           ))}
         </List.Section>
-      ))}
-      {snapshot.resetPolicy && (
-        <List.Section title="Reset Policy">
-          <List.Item
-            icon={Icon.ArrowClockwise}
-            title="Policy"
-            subtitle={snapshot.resetPolicy}
-            actions={renderActions(snapshot)}
-          />
-        </List.Section>
       )}
-      {rawPayloadSummary && (
-        <List.Section title="Raw Payload">
-          <List.Item
-            icon={Icon.Document}
-            title="Payload Captured"
-            subtitle={`${rawPayloadSummary}. Use “Copy ... Debug Bundle” to export a redacted payload.`}
-            actions={renderActions(snapshot)}
-          />
-        </List.Section>
-      )}
+
       <List.Section title="Quotas" subtitle={`${snapshot.quotas.length} tracked`}>
         {snapshot.quotas.map((quota) => (
           <List.Item
@@ -122,6 +116,7 @@ export function ProviderDetailView({
           />
         ))}
       </List.Section>
+
       {snapshot.quotas.length > 0 && (
         <List.Section title="History">
           {snapshot.quotas.map((quota) => {
@@ -154,6 +149,44 @@ export function ProviderDetailView({
           })}
         </List.Section>
       )}
+
+      {metadataSectionsAfterTop.map((section) => (
+        <List.Section key={section.id} title={section.title}>
+          {section.items.map((item, index) => (
+            <List.Item
+              key={`${section.id}-${index}`}
+              icon={Icon.Dot}
+              title={item.label}
+              subtitle={item.value}
+              accessories={item.subtitle ? [{ text: item.subtitle }] : undefined}
+              actions={renderActions(snapshot)}
+            />
+          ))}
+        </List.Section>
+      ))}
+
+      {snapshot.resetPolicy && (
+        <List.Section title="Reset Policy">
+          <List.Item
+            icon={Icon.ArrowClockwise}
+            title="Policy"
+            subtitle={snapshot.resetPolicy}
+            actions={renderActions(snapshot)}
+          />
+        </List.Section>
+      )}
+
+      {rawPayloadSummary && (
+        <List.Section title="Raw Payload">
+          <List.Item
+            icon={Icon.Document}
+            title="Payload Captured"
+            subtitle={`${rawPayloadSummary}. Use "Copy ... Debug Bundle" to export a redacted payload.`}
+            actions={renderActions(snapshot)}
+          />
+        </List.Section>
+      )}
+
       {issues.length > 0 && (
         <List.Section title="Issues" subtitle={`${issues.length} active`}>
           {issues.map((issue, index) => (
@@ -167,6 +200,7 @@ export function ProviderDetailView({
           ))}
         </List.Section>
       )}
+
       {snapshot.provider === "copilot" && pendingCopilotLogin && (
         <List.Section title="Copilot Device Login">
           <List.Item
