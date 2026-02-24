@@ -1,7 +1,7 @@
 import { ProviderId, ProviderUsageSnapshot, QuotaStatus } from "../models/usage";
 import { formatRelativeTimestamp } from "./date";
 
-export const PROVIDER_ORDER: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini"];
+export const PROVIDER_ORDER: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini", "antigravity"];
 
 export interface ProviderRowSummary {
   provider: ProviderId;
@@ -44,6 +44,10 @@ function providerTitle(provider: ProviderId): string {
 
   if (provider === "gemini") {
     return "Gemini";
+  }
+
+  if (provider === "antigravity") {
+    return "Antigravity";
   }
 
   return "GitHub Copilot";

@@ -1,10 +1,10 @@
 # Agent Usage (Raycast)
 
-Track Codex, Claude, Cursor, Gemini, and GitHub Copilot usage limits and reset windows in one Raycast command.
+Track Codex, Claude, Cursor, Gemini, Antigravity, and GitHub Copilot usage limits and reset windows in one Raycast command.
 
 ## Features
 
-- Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, Gemini, and Copilot.
+- Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, Gemini, Antigravity, and Copilot.
 - Provider drilldown views with quota details, inline issues, provider-scoped actions, and richer provider metadata.
 - Progress rings based on real remaining percentage.
 - Copilot device login flow inside the command.
@@ -23,6 +23,8 @@ Track Codex, Claude, Cursor, Gemini, and GitHub Copilot usage limits and reset w
   - Includes included-plan budget, on-demand budget, team on-demand (if present), and legacy request limits (if present).
 - Gemini: Cloud Code quota endpoints (`https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) with Gemini CLI OAuth credentials.
   - Includes grouped model quotas (Pro/Flash), tier hints from `loadCodeAssist`, and project-aware quota lookup.
+- Antigravity: local language-server endpoints (for example `/exa.language_server_pb.LanguageServerService/GetUserStatus`) using your local server URL and CSRF token.
+  - Includes model quota tracking for Claude, Gemini Pro, and Gemini Flash when present.
 - Copilot: GitHub Copilot endpoint (`https://api.github.com/copilot_internal/user`) with device flow or token auth.
   - If reset timestamps are missing in the response, Copilot resets default to the next first-of-month boundary.
 
@@ -62,6 +64,10 @@ Track Codex, Claude, Cursor, Gemini, and GitHub Copilot usage limits and reset w
    - Automatic: use existing Gemini CLI OAuth credentials from `~/.gemini/oauth_creds.json`
    - Optional: set `Gemini OAuth Access Token` in extension preferences
    - Run `gemini` in terminal if credentials are missing or expired
+6. Antigravity
+   - Auto: keep Antigravity running; extension auto-detects local server URL + CSRF token
+   - Optional override: set `Antigravity Server URL` and `Antigravity CSRF Token` in extension preferences
+   - Uses local Antigravity language-server quota endpoints
 
 ## Store publishing checklist
 
@@ -81,7 +87,8 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
 2. If Codex or Claude is unavailable, refresh login with `codex login` or `claude login`, then refresh the dashboard.
 3. If Cursor is unavailable, update `Cursor Cookie Header` in preferences from a fresh `cursor.com` session.
 4. If Gemini is unavailable, run `gemini` to refresh OAuth credentials, then refresh.
-5. If Copilot is unavailable, use device login again or set a fresh token.
+5. If Antigravity is unavailable, keep Antigravity running for auto-detect, or set server URL + CSRF token in preferences, then refresh.
+6. If Copilot is unavailable, use device login again or set a fresh token.
 
 ## Known limitations
 

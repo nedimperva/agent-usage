@@ -34,6 +34,7 @@ import { fetchCodexSnapshot } from "./providers/codex";
 import { fetchCopilotSnapshot, pollCopilotDeviceToken, requestCopilotDeviceCode } from "./providers/copilot";
 import { fetchCursorSnapshot } from "./providers/cursor";
 import { fetchGeminiSnapshot } from "./providers/gemini";
+import { fetchAntigravitySnapshot } from "./providers/antigravity";
 
 const COPILOT_TOKEN_STORAGE_KEY = "agent-usage.copilot.device-token.v1";
 const COPILOT_DEVICE_PENDING_KEY = "agent-usage.copilot.device-pending.v1";
@@ -44,11 +45,14 @@ interface Preferences {
   codexAuthToken?: string;
   claudeAccessToken?: string;
   geminiAccessToken?: string;
+  antigravityCsrfToken?: string;
+  antigravityServerUrl?: string;
   copilotApiToken?: string;
   cursorCookieHeader?: string;
   codexUsageUrl?: string;
   claudeUsageUrl?: string;
   geminiUsageUrl?: string;
+  antigravityUsageUrl?: string;
   copilotUsageUrl?: string;
   cursorUsageUrl?: string;
 }
@@ -65,6 +69,7 @@ const PROVIDER_TITLES: Record<ProviderId, string> = {
   codex: "Codex",
   claude: "Claude",
   gemini: "Gemini",
+  antigravity: "Antigravity",
   copilot: "GitHub Copilot",
   cursor: "Cursor",
 };
@@ -96,6 +101,12 @@ function providerUrl(provider: ProviderId, preferences: Preferences): string {
 
   if (provider === "gemini") {
     return preferences.geminiUsageUrl?.trim() || "https://aistudio.google.com/app/plan";
+  }
+
+  if (provider === "antigravity") {
+    return (
+      preferences.antigravityUsageUrl?.trim() || preferences.antigravityServerUrl?.trim() || "https://antigravity.dev"
+    );
   }
 
   if (provider === "cursor") {
@@ -219,6 +230,10 @@ export default function Command() {
         return fetchGeminiSnapshot(preferences.geminiAccessToken);
       }
 
+      if (provider === "antigravity") {
+        return fetchAntigravitySnapshot(preferences.antigravityServerUrl, preferences.antigravityCsrfToken);
+      }
+
       const copilotToken = resolveCopilotToken();
       if (!copilotToken) {
         const pending = pendingCopilotLogin;
@@ -248,6 +263,8 @@ export default function Command() {
       preferences.copilotApiToken,
       preferences.cursorCookieHeader,
       preferences.geminiAccessToken,
+      preferences.antigravityServerUrl,
+      preferences.antigravityCsrfToken,
       resolveCopilotToken,
     ],
   );
@@ -552,6 +569,13 @@ export default function Command() {
         return buildFallbackSnapshot("gemini", "Run `gemini` to authenticate, then refresh.");
       }
 
+      if (providerId === "antigravity") {
+        return buildFallbackSnapshot(
+          "antigravity",
+          "Keep Antigravity running for auto-detect, or set Server URL + CSRF token in preferences.",
+        );
+      }
+
       return buildFallbackSnapshot("copilot", "Start Copilot Device Login, then Complete Copilot Device Login.");
     });
   }, [snapshots]);
@@ -598,6 +622,16 @@ export default function Command() {
         await showToast({
           title: "Gemini auth repair",
           message: "Copied `gemini`. Run it in terminal to authenticate, then refresh.",
+          style: Toast.Style.Success,
+        });
+        return;
+      }
+
+      if (provider === "antigravity") {
+        await openExtensionPreferences();
+        await showToast({
+          title: "Antigravity auth repair",
+          message: "Auto-detect works when Antigravity is running; otherwise set Server URL + CSRF token.",
           style: Toast.Style.Success,
         });
         return;
