@@ -130,7 +130,7 @@ function buildFallbackSnapshot(provider: ProviderId, reason: string): ProviderUs
         status: "unknown",
       },
     ],
-    source: "manual",
+    source: "api",
   };
 }
 

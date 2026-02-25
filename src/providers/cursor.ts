@@ -5,6 +5,7 @@ import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
 import { parseDateLike, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
 
 const CURSOR_BASE_URL = "https://cursor.com";
+const CURSOR_DASHBOARD_BASE_URL = "https://api2.cursor.sh";
 const BROWSER_LIKE_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const CURSOR_SESSION_COOKIE_NAMES = new Set([
@@ -12,6 +13,14 @@ const CURSOR_SESSION_COOKIE_NAMES = new Set([
   "__Secure-next-auth.session-token",
   "next-auth.session-token",
 ]);
+const CURSOR_DESKTOP_AUTH_SOURCE = "auto:cursor-desktop-auth";
+const CURSOR_DESKTOP_AUTH_KEYS = [
+  "cursorAuth/accessToken",
+  "cursorAuth/refreshToken",
+  "cursorAuth/cachedEmail",
+  "cursorAuth/stripeMembershipType",
+  "cursorAuth/stripeSubscriptionStatus",
+] as const;
 
 interface CursorUsageSummary {
   billingCycleStart?: unknown;
@@ -68,6 +77,124 @@ interface CursorLegacyUsageResponse {
   };
 }
 
+interface CursorDashboardGetMeResponse {
+  authId?: unknown;
+  email?: unknown;
+}
+
+interface CursorDashboardCurrentPeriodUsageResponse {
+  billingCycleStart?: unknown;
+  billing_cycle_start?: unknown;
+  billingCycleEnd?: unknown;
+  billing_cycle_end?: unknown;
+  planUsage?: {
+    totalSpend?: unknown;
+    total_spend?: unknown;
+    includedSpend?: unknown;
+    included_spend?: unknown;
+    bonusSpend?: unknown;
+    bonus_spend?: unknown;
+    remaining?: unknown;
+    limit?: unknown;
+    totalPercentUsed?: unknown;
+    total_percent_used?: unknown;
+    autoPercentUsed?: unknown;
+    auto_percent_used?: unknown;
+    apiPercentUsed?: unknown;
+    api_percent_used?: unknown;
+  };
+  plan_usage?: {
+    total_spend?: unknown;
+    included_spend?: unknown;
+    bonus_spend?: unknown;
+    remaining?: unknown;
+    limit?: unknown;
+    total_percent_used?: unknown;
+    auto_percent_used?: unknown;
+    api_percent_used?: unknown;
+  };
+  spendLimitUsage?: {
+    totalSpend?: unknown;
+    total_spend?: unknown;
+    pooledLimit?: unknown;
+    pooled_limit?: unknown;
+    pooledUsed?: unknown;
+    pooled_used?: unknown;
+    pooledRemaining?: unknown;
+    pooled_remaining?: unknown;
+    individualLimit?: unknown;
+    individual_limit?: unknown;
+    individualUsed?: unknown;
+    individual_used?: unknown;
+    individualRemaining?: unknown;
+    individual_remaining?: unknown;
+    limitType?: unknown;
+    limit_type?: unknown;
+  };
+  spend_limit_usage?: {
+    total_spend?: unknown;
+    pooled_limit?: unknown;
+    pooled_used?: unknown;
+    pooled_remaining?: unknown;
+    individual_limit?: unknown;
+    individual_used?: unknown;
+    individual_remaining?: unknown;
+    limit_type?: unknown;
+  };
+  enabled?: unknown;
+  displayMessage?: unknown;
+  display_message?: unknown;
+  autoModelSelectedDisplayMessage?: unknown;
+  auto_model_selected_display_message?: unknown;
+  namedModelSelectedDisplayMessage?: unknown;
+  named_model_selected_display_message?: unknown;
+}
+
+interface CursorDashboardPlanInfoResponse {
+  planInfo?: {
+    planName?: unknown;
+    plan_name?: unknown;
+    includedAmountCents?: unknown;
+    included_amount_cents?: unknown;
+    billingCycleEnd?: unknown;
+    billing_cycle_end?: unknown;
+  };
+  plan_info?: {
+    plan_name?: unknown;
+    included_amount_cents?: unknown;
+    billing_cycle_end?: unknown;
+  };
+}
+
+interface CursorDesktopAuthDiscovery {
+  accessToken?: unknown;
+  refreshToken?: unknown;
+  cachedEmail?: unknown;
+  stripeMembershipType?: unknown;
+  stripeSubscriptionStatus?: unknown;
+}
+
+interface CursorDesktopDashboardSnapshot {
+  summary: CursorUsageSummary;
+  user?: CursorUserInfo;
+  source: string;
+  planLabel?: string;
+  rawPayload: Record<string, unknown>;
+}
+
+interface CursorSqliteStatement {
+  all: (...params: unknown[]) => Array<Record<string, unknown>>;
+}
+
+interface CursorSqliteDatabase {
+  prepare: (sql: string) => CursorSqliteStatement;
+  close: () => void;
+}
+
+interface CursorSqliteModule {
+  DatabaseSync: new (path: string, options?: Record<string, unknown>) => CursorSqliteDatabase;
+}
+
 function runCommand(binary: string, args: string[], timeoutMs = 12000): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -105,6 +232,248 @@ async function runPythonScript(script: string): Promise<string | undefined> {
   }
 
   return undefined;
+}
+
+const CURSOR_DESKTOP_AUTH_DISCOVERY_SCRIPT = String.raw`
+import json
+import os
+import sqlite3
+
+appdata = os.environ.get("APPDATA", "")
+state = os.path.join(appdata, "Cursor", "User", "globalStorage", "state.vscdb")
+if not os.path.exists(state):
+    print("{}")
+    raise SystemExit(0)
+
+conn = sqlite3.connect(state)
+cursor = conn.cursor()
+rows = []
+for table in ("ItemTable", "itemTable"):
+    try:
+        cursor.execute(
+            f"SELECT key, value FROM {table} WHERE "
+            "key IN ("
+            "'cursorAuth/accessToken', "
+            "'cursorAuth/refreshToken', "
+            "'cursorAuth/cachedEmail', "
+            "'cursorAuth/stripeMembershipType', "
+            "'cursorAuth/stripeSubscriptionStatus') "
+            "OR key LIKE 'cursorAuth/%' "
+            "OR lower(key) LIKE '%cursorauth%'"
+        )
+        rows = cursor.fetchall()
+        if rows:
+            break
+    except Exception:
+        continue
+conn.close()
+
+result = {}
+for key, value in rows:
+    if key and key not in result:
+        result[key] = value
+
+print(json.dumps(result))
+`;
+
+function coerceCursorDesktopAuthValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value instanceof Uint8Array) {
+    const decoded = Buffer.from(value).toString("utf8").trim();
+    return decoded ? decoded : undefined;
+  }
+  return undefined;
+}
+
+function normalizeCursorDesktopAuthKey(rawKey: string): string {
+  return rawKey
+    .replace(/^cursorauth\//i, "")
+    .replace(/^cursorauth[:/]/i, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+}
+
+function assignCursorDesktopAuthField(
+  result: CursorDesktopAuthDiscovery,
+  key: string | undefined,
+  value: string | undefined,
+): void {
+  if (!key || value === undefined) {
+    return;
+  }
+
+  const normalized = normalizeCursorDesktopAuthKey(key);
+  if (normalized === "accesstoken" && !result.accessToken) {
+    result.accessToken = value;
+    return;
+  }
+  if (normalized === "refreshtoken" && !result.refreshToken) {
+    result.refreshToken = value;
+    return;
+  }
+  if ((normalized === "cachedemail" || normalized === "email") && !result.cachedEmail) {
+    result.cachedEmail = value;
+    return;
+  }
+  if ((normalized === "stripemembershiptype" || normalized === "membershiptype") && !result.stripeMembershipType) {
+    result.stripeMembershipType = value;
+    return;
+  }
+  if (
+    (normalized === "stripesubscriptionstatus" || normalized === "subscriptionstatus") &&
+    !result.stripeSubscriptionStatus
+  ) {
+    result.stripeSubscriptionStatus = value;
+  }
+}
+
+function parseCursorDesktopAuthJson(raw: string): unknown | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed || !/^(?:\[|\{|")/.test(trimmed)) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "string" && parsed !== trimmed) {
+      return parseCursorDesktopAuthJson(parsed) ?? parsed;
+    }
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractCursorDesktopAuthFromUnknown(value: unknown, result: CursorDesktopAuthDiscovery): void {
+  const queue: unknown[] = [value];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        queue.push(entry);
+      }
+      continue;
+    }
+
+    for (const [key, nested] of Object.entries(current as Record<string, unknown>)) {
+      assignCursorDesktopAuthField(result, key, coerceCursorDesktopAuthValue(nested));
+      if (nested && typeof nested === "object") {
+        queue.push(nested);
+        continue;
+      }
+      const nestedString = coerceCursorDesktopAuthValue(nested);
+      if (!nestedString) {
+        continue;
+      }
+      const parsedNested = parseCursorDesktopAuthJson(nestedString);
+      if (parsedNested && typeof parsedNested === "object") {
+        queue.push(parsedNested);
+      }
+    }
+  }
+}
+
+export function mapCursorDesktopAuthRows(rows: Array<Record<string, unknown>>): CursorDesktopAuthDiscovery | undefined {
+  const result: CursorDesktopAuthDiscovery = {};
+
+  for (const row of rows) {
+    const key = safeString(row.key);
+    const value = coerceCursorDesktopAuthValue(row.value);
+    assignCursorDesktopAuthField(result, key, value);
+
+    if (!value) {
+      continue;
+    }
+
+    const parsed = parseCursorDesktopAuthJson(value);
+    if (parsed && typeof parsed === "object") {
+      extractCursorDesktopAuthFromUnknown(parsed, result);
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+async function discoverCursorDesktopAuthFromNodeSqlite(): Promise<CursorDesktopAuthDiscovery | undefined> {
+  const appData = safeString(process.env.APPDATA);
+  if (!appData) {
+    return undefined;
+  }
+
+  const statePath = `${appData}\\Cursor\\User\\globalStorage\\state.vscdb`;
+  try {
+    await fs.access(statePath);
+  } catch {
+    return undefined;
+  }
+
+  let db: CursorSqliteDatabase | undefined;
+  try {
+    const sqliteModule = (await import("node:sqlite")) as unknown as CursorSqliteModule;
+    db = new sqliteModule.DatabaseSync(statePath, { readonly: true });
+
+    const placeholders = CURSOR_DESKTOP_AUTH_KEYS.map(() => "?").join(", ");
+    const query = (table: string) =>
+      `SELECT key, value FROM ${table} ` +
+      `WHERE key IN (${placeholders}) ` +
+      `OR key LIKE 'cursorAuth/%' ` +
+      `OR lower(key) LIKE '%cursorauth%'`;
+
+    for (const table of ["ItemTable", "itemTable"]) {
+      try {
+        const rows = db.prepare(query(table)).all(...CURSOR_DESKTOP_AUTH_KEYS);
+        const parsed = mapCursorDesktopAuthRows(rows);
+        if (parsed) {
+          return parsed;
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return undefined;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // noop
+    }
+  }
+
+  return undefined;
+}
+
+async function discoverCursorDesktopAuth(): Promise<CursorDesktopAuthDiscovery | undefined> {
+  const sqliteDiscovered = await discoverCursorDesktopAuthFromNodeSqlite();
+  if (sqliteDiscovered) {
+    return sqliteDiscovered;
+  }
+
+  const stdout = await runPythonScript(CURSOR_DESKTOP_AUTH_DISCOVERY_SCRIPT);
+  if (!stdout) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    return mapCursorDesktopAuthRows(
+      Object.entries(parsed).map(([key, value]) => ({
+        key,
+        value,
+      })),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 async function dpapiUnprotect(value: Buffer): Promise<Buffer | undefined> {
@@ -239,19 +608,55 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import urllib.parse
+
+LOCK_ERROR_SUBSTRINGS = [
+    "used by another process",
+    "cannot access the file",
+    "permission denied",
+    "sharing violation",
+]
+
+query_diagnostics = {
+    "lockedCount": 0,
+    "copyFailures": 0,
+    "readOnlyFailures": 0,
+}
+
+def _looks_locked_error(exc):
+    text = str(exc).lower()
+    return any(token in text for token in LOCK_ERROR_SUBSTRINGS)
 
 def query_sqlite(path, query, params):
+    def _query_from_connection(conn):
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        return rows
+
+    def _query_read_only():
+        escaped = urllib.parse.quote(path.replace("\\", "/"), safe="/:")
+        uri = f"file:{escaped}?mode=ro&immutable=1"
+        conn = sqlite3.connect(uri, uri=True)
+        return _query_from_connection(conn)
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sqlite")
     tmp.close()
     try:
         shutil.copy2(path, tmp.name)
         conn = sqlite3.connect(tmp.name)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(query, params).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        return []
+        return _query_from_connection(conn)
+    except Exception as exc:
+        query_diagnostics["copyFailures"] += 1
+        if _looks_locked_error(exc):
+            query_diagnostics["lockedCount"] += 1
+        try:
+            return _query_read_only()
+        except Exception as inner_exc:
+            query_diagnostics["readOnlyFailures"] += 1
+            if _looks_locked_error(inner_exc):
+                query_diagnostics["lockedCount"] += 1
+            return []
     finally:
         try:
             os.unlink(tmp.name)
@@ -262,19 +667,37 @@ def discover_chromium():
     results = []
     v20_count = 0
     localapp = os.environ.get("LOCALAPPDATA", "")
+    appdata = os.environ.get("APPDATA", "")
     browsers = [
         ("chrome", os.path.join(localapp, "Google", "Chrome", "User Data")),
         ("edge", os.path.join(localapp, "Microsoft", "Edge", "User Data")),
         ("brave", os.path.join(localapp, "BraveSoftware", "Brave-Browser", "User Data")),
     ]
+
+    cursor_root = os.path.join(appdata, "Cursor") if appdata else ""
+    if cursor_root and os.path.isdir(cursor_root):
+        browsers.append(("cursor", cursor_root))
+
+    cursor_partitions = os.path.join(cursor_root, "Partitions") if cursor_root else ""
+    if cursor_partitions and os.path.isdir(cursor_partitions):
+        for partition in sorted(glob.glob(os.path.join(cursor_partitions, "cursor-browser*"))):
+            if os.path.isdir(partition):
+                browsers.append(("cursor", partition))
+
     for browser, user_data in browsers:
         if not os.path.isdir(user_data):
             continue
-        local_state = os.path.join(user_data, "Local State")
-        profile_globs = [os.path.join(user_data, "Default"), os.path.join(user_data, "Profile *")]
-        profiles = []
-        for pattern in profile_globs:
-            profiles.extend(glob.glob(pattern))
+
+        if browser == "cursor":
+            local_state = os.path.join(cursor_root, "Local State")
+            profiles = [user_data]
+        else:
+            local_state = os.path.join(user_data, "Local State")
+            profile_globs = [os.path.join(user_data, "Default"), os.path.join(user_data, "Profile *")]
+            profiles = []
+            for pattern in profile_globs:
+                profiles.extend(glob.glob(pattern))
+
         for profile in profiles:
             candidates = [
                 os.path.join(profile, "Network", "Cookies"),
@@ -338,11 +761,15 @@ print(json.dumps({
     "firefox": discover_firefox(),
     "diagnostics": {
         "chromiumV20Count": chromium_v20_count,
+        "lockedDbCount": query_diagnostics["lockedCount"],
+        "copyFailureCount": query_diagnostics["copyFailures"],
+        "readOnlyFailureCount": query_diagnostics["readOnlyFailures"],
     },
 }))
 `;
 
 let lastBrowserDiscoveryHasChromiumV20 = false;
+let lastBrowserDiscoveryHadLockedDatabases = false;
 
 function buildCursorBrowserSource(browser: string, profile?: string): string {
   const profileLabel = profile
@@ -387,6 +814,7 @@ async function discoverCursorCookieFromBrowsers(): Promise<CursorCookieCandidate
   lastBrowserDiscoveryHasChromiumV20 =
     (parsed.diagnostics?.chromiumV20Count ?? 0) > 0 ||
     (parsed.chromium ?? []).some((row) => (row.encrypted_hex ?? "").toLowerCase().startsWith("763230"));
+  lastBrowserDiscoveryHadLockedDatabases = (parsed.diagnostics?.lockedDbCount ?? 0) > 0;
 
   const firefoxBuckets = new Map<string, Map<string, string>>();
   for (const row of parsed.firefox ?? []) {
@@ -471,12 +899,13 @@ function normalizeCursorSourceMode(value: string | undefined): CursorCookieSourc
   return "auto";
 }
 
-async function resolveCursorCookieCandidates(options: CursorFetchOptions): Promise<CursorCookieCandidate[]> {
+async function resolveCursorCookieCandidates(options: CursorFetchOptions): Promise<CursorCookieResolution> {
   const manual = options.cookieHeader?.trim();
   const cached = options.cachedCookieHeader?.trim();
   const sourceMode = normalizeCursorSourceMode(options.cookieSourceMode);
   const envCookie = process.env.CURSOR_COOKIE_HEADER?.trim() || process.env.CURSOR_COOKIE?.trim();
   const candidates: CursorCookieCandidate[] = [];
+  const browserSources: string[] = [];
   const pushCandidate = (header: string | undefined, source: string) => {
     if (!header) {
       return;
@@ -495,7 +924,18 @@ async function resolveCursorCookieCandidates(options: CursorFetchOptions): Promi
     pushCandidate(manual, "manual preference");
     pushCandidate(cached, "cache");
     pushCandidate(envCookie, "environment");
-    return candidates;
+    return {
+      candidates,
+      diagnostics: {
+        sourceMode,
+        manualProvided: !!manual,
+        cachedProvided: !!cached,
+        envProvided: !!envCookie,
+        browserCandidateCount: 0,
+        browserSources: [],
+        browserLockedDatabases: false,
+      },
+    };
   }
 
   pushCandidate(manual, "manual preference");
@@ -503,12 +943,39 @@ async function resolveCursorCookieCandidates(options: CursorFetchOptions): Promi
 
   const browserCandidates = await discoverCursorCookieFromBrowsers();
   for (const browserCandidate of browserCandidates) {
+    browserSources.push(browserCandidate.source);
     pushCandidate(browserCandidate.header, browserCandidate.source);
   }
 
   pushCandidate(envCookie, "environment");
 
-  return candidates;
+  return {
+    candidates,
+    diagnostics: {
+      sourceMode,
+      manualProvided: !!manual,
+      cachedProvided: !!cached,
+      envProvided: !!envCookie,
+      browserCandidateCount: browserCandidates.length,
+      browserSources: Array.from(new Set(browserSources)),
+      browserLockedDatabases: lastBrowserDiscoveryHadLockedDatabases,
+    },
+  };
+}
+
+interface CursorCookieResolutionDiagnostics {
+  sourceMode: CursorCookieSourceMode;
+  manualProvided: boolean;
+  cachedProvided: boolean;
+  envProvided: boolean;
+  browserCandidateCount: number;
+  browserSources: string[];
+  browserLockedDatabases: boolean;
+}
+
+interface CursorCookieResolution {
+  candidates: CursorCookieCandidate[];
+  diagnostics: CursorCookieResolutionDiagnostics;
 }
 
 type CursorCookieSourceMode = "auto" | "manual";
@@ -548,7 +1015,29 @@ interface BrowserCookieDiscovery {
   firefox?: FirefoxCookieRecord[];
   diagnostics?: {
     chromiumV20Count?: number;
+    lockedDbCount?: number;
+    copyFailureCount?: number;
+    readOnlyFailureCount?: number;
   };
+}
+
+function formatCursorCookieDiagnostics(diagnostics: CursorCookieResolutionDiagnostics): string {
+  const sources =
+    diagnostics.browserSources.length > 0
+      ? ` (${diagnostics.browserSources.join(", ")})`
+      : diagnostics.sourceMode === "manual"
+        ? ""
+        : " (none found)";
+  return [
+    `mode=${diagnostics.sourceMode}`,
+    `manual=${diagnostics.manualProvided ? "set" : "empty"}`,
+    `cache=${diagnostics.cachedProvided ? "set" : "empty"}`,
+    diagnostics.sourceMode === "manual" ? "" : `browser=${diagnostics.browserCandidateCount}${sources}`,
+    diagnostics.sourceMode === "manual" ? "" : `browserLocked=${diagnostics.browserLockedDatabases ? "yes" : "no"}`,
+    `env=${diagnostics.envProvided ? "set" : "empty"}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 function parseCookieLineFromMultilineInput(input: string): string | undefined {
@@ -844,80 +1333,285 @@ async function requestCursorJson<T>(
   return (await response.json()) as T;
 }
 
+async function requestCursorDashboardJson<T>(
+  path: string,
+  accessToken: string,
+  options: { allowUnauthorized?: boolean } = {},
+): Promise<T | undefined> {
+  const response = await fetch(`${CURSOR_DASHBOARD_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "User-Agent": BROWSER_LIKE_USER_AGENT,
+    },
+    body: "{}",
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    if (options.allowUnauthorized) {
+      return undefined;
+    }
+    throw new Error("Cursor desktop auth token is invalid/expired. Reopen Cursor and sign in again.");
+  }
+
+  if (!response.ok) {
+    if (options.allowUnauthorized) {
+      return undefined;
+    }
+    const body = await response.text();
+    throw new Error(`Cursor dashboard API ${response.status}: ${body.slice(0, 220)}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function toEpochMsNumber(value: unknown): number | undefined {
+  const parsed = parseOptionalNumber(value);
+  if (parsed === undefined || !Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return parsed;
+}
+
+async function fetchCursorDesktopDashboardSnapshot(): Promise<CursorDesktopDashboardSnapshot> {
+  const desktopAuth = await discoverCursorDesktopAuth();
+  const accessToken = safeString(desktopAuth?.accessToken);
+  if (!accessToken) {
+    throw new Error("No Cursor desktop auth token found in local Cursor state.");
+  }
+
+  const usage = await requestCursorDashboardJson<CursorDashboardCurrentPeriodUsageResponse>(
+    "/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+    accessToken,
+  );
+  if (!usage) {
+    throw new Error("Cursor desktop usage response was empty.");
+  }
+
+  const me = await requestCursorDashboardJson<CursorDashboardGetMeResponse>(
+    "/aiserver.v1.DashboardService/GetMe",
+    accessToken,
+    { allowUnauthorized: true },
+  );
+  const planInfo = await requestCursorDashboardJson<CursorDashboardPlanInfoResponse>(
+    "/aiserver.v1.DashboardService/GetPlanInfo",
+    accessToken,
+    { allowUnauthorized: true },
+  );
+
+  const usagePlan = (usage.planUsage ?? usage.plan_usage) as Record<string, unknown> | undefined;
+  const usageSpendLimit = (usage.spendLimitUsage ?? usage.spend_limit_usage) as Record<string, unknown> | undefined;
+
+  const planTotalSpend = parseOptionalNumber(usagePlan?.["totalSpend"] ?? usagePlan?.["total_spend"]);
+  const planLimit = parseOptionalNumber(usagePlan?.["limit"]);
+  const derivedPlanRemaining =
+    planLimit !== undefined && planTotalSpend !== undefined ? Math.max(0, planLimit - planTotalSpend) : undefined;
+  const planRemaining = parseOptionalNumber(usagePlan?.["remaining"]) ?? derivedPlanRemaining;
+  const planUsedPercent = parseOptionalNumber(usagePlan?.["totalPercentUsed"] ?? usagePlan?.["total_percent_used"]);
+
+  const individualUsed = parseOptionalNumber(
+    usageSpendLimit?.["individualUsed"] ?? usageSpendLimit?.["individual_used"],
+  );
+  const individualLimit = parseOptionalNumber(
+    usageSpendLimit?.["individualLimit"] ?? usageSpendLimit?.["individual_limit"],
+  );
+  const individualRemaining =
+    parseOptionalNumber(usageSpendLimit?.["individualRemaining"] ?? usageSpendLimit?.["individual_remaining"]) ??
+    (individualLimit !== undefined && individualUsed !== undefined
+      ? Math.max(0, individualLimit - individualUsed)
+      : undefined);
+  const individualPercentUsed =
+    individualLimit !== undefined && individualLimit > 0 && individualUsed !== undefined
+      ? (individualUsed / individualLimit) * 100
+      : undefined;
+
+  const pooledUsed = parseOptionalNumber(usageSpendLimit?.["pooledUsed"] ?? usageSpendLimit?.["pooled_used"]);
+  const pooledLimit = parseOptionalNumber(usageSpendLimit?.["pooledLimit"] ?? usageSpendLimit?.["pooled_limit"]);
+  const pooledRemaining =
+    parseOptionalNumber(usageSpendLimit?.["pooledRemaining"] ?? usageSpendLimit?.["pooled_remaining"]) ??
+    (pooledLimit !== undefined && pooledUsed !== undefined ? Math.max(0, pooledLimit - pooledUsed) : undefined);
+  const pooledPercentUsed =
+    pooledLimit !== undefined && pooledLimit > 0 && pooledUsed !== undefined
+      ? (pooledUsed / pooledLimit) * 100
+      : undefined;
+
+  const billingCycleStart = toEpochMsNumber(usage.billingCycleStart ?? usage.billing_cycle_start);
+  const billingCycleEnd =
+    toEpochMsNumber(usage.billingCycleEnd ?? usage.billing_cycle_end) ??
+    toEpochMsNumber(
+      planInfo?.planInfo?.billingCycleEnd ??
+        planInfo?.planInfo?.billing_cycle_end ??
+        planInfo?.plan_info?.billing_cycle_end,
+    );
+
+  const summary: CursorUsageSummary = {
+    billingCycleStart,
+    billingCycleEnd,
+    membershipType:
+      safeString(planInfo?.planInfo?.planName ?? planInfo?.planInfo?.plan_name ?? planInfo?.plan_info?.plan_name) ??
+      safeString(desktopAuth?.stripeMembershipType),
+    limitType: usageSpendLimit?.["limitType"] ?? usageSpendLimit?.["limit_type"],
+    autoModelSelectedDisplayMessage: usage.autoModelSelectedDisplayMessage ?? usage.auto_model_selected_display_message,
+    namedModelSelectedDisplayMessage:
+      usage.namedModelSelectedDisplayMessage ?? usage.named_model_selected_display_message,
+    individualUsage: {
+      plan: {
+        used: planTotalSpend,
+        limit: planLimit,
+        remaining: planRemaining,
+        totalPercentUsed: planUsedPercent,
+      },
+      onDemand: {
+        used: individualUsed,
+        limit: individualLimit,
+        remaining: individualRemaining,
+        totalPercentUsed: individualPercentUsed,
+      },
+    },
+    teamUsage: {
+      onDemand: {
+        used: pooledUsed,
+        limit: pooledLimit,
+        remaining: pooledRemaining,
+        totalPercentUsed: pooledPercentUsed,
+      },
+    },
+  };
+
+  const user: CursorUserInfo | undefined = me
+    ? {
+        sub: me.authId,
+        email: me.email ?? desktopAuth?.cachedEmail,
+      }
+    : desktopAuth?.cachedEmail
+      ? {
+          email: desktopAuth.cachedEmail,
+        }
+      : undefined;
+
+  const planLabel =
+    safeString(planInfo?.planInfo?.planName ?? planInfo?.planInfo?.plan_name ?? planInfo?.plan_info?.plan_name) ??
+    safeString(desktopAuth?.stripeMembershipType);
+
+  return {
+    summary,
+    user,
+    source: CURSOR_DESKTOP_AUTH_SOURCE,
+    planLabel,
+    rawPayload: {
+      usage,
+      me,
+      planInfo,
+      membershipType: desktopAuth?.stripeMembershipType,
+      subscriptionStatus: desktopAuth?.stripeSubscriptionStatus,
+    },
+  };
+}
+
 export async function fetchCursorSnapshot(input?: string | CursorFetchOptions): Promise<ProviderUsageSnapshot> {
   const options: CursorFetchOptions = typeof input === "string" ? { cookieHeader: input } : (input ?? {});
   const sourceMode = normalizeCursorSourceMode(options.cookieSourceMode);
-  const candidates = await resolveCursorCookieCandidates(options);
-  if (candidates.length === 0) {
-    if (sourceMode === "manual") {
-      throw new Error("Cursor Cookie Source is manual, but no Cursor Cookie Header is configured.");
-    }
-    if (lastBrowserDiscoveryHasChromiumV20) {
-      throw new Error(
-        "Cursor browser cookies are Chrome app-bound (`v20`) and cannot be auto-read here. Use Manual mode and paste a Cookie header from cursor.com.",
-      );
-    }
-    throw new Error(
-      "No Cursor cookie session found. Set header manually or use Auto with an authenticated browser session.",
-    );
-  }
+  const resolution = await resolveCursorCookieCandidates(options);
+  const candidates = resolution.candidates;
+  const diagnosticsText = formatCursorCookieDiagnostics(resolution.diagnostics);
 
   let summary: CursorUsageSummary | undefined;
   let user: CursorUserInfo | undefined;
   let legacyUsage: CursorLegacyUsageResponse | undefined;
   let selectedCookie: CursorCookieCandidate | undefined;
+  let selectedAuthSource: string | undefined;
+  let dashboardRawPayload: Record<string, unknown> | undefined;
+  let planLabelOverride: string | undefined;
   let lastError: Error | undefined;
+  let desktopFallbackError: Error | undefined;
   const attemptedSources: string[] = [];
 
-  for (const candidate of candidates) {
-    attemptedSources.push(candidate.source);
-    try {
-      const currentSummary = await requestCursorJson<CursorUsageSummary>("/api/usage-summary", candidate.header);
-      if (!currentSummary) {
+  if (candidates.length > 0) {
+    for (const candidate of candidates) {
+      attemptedSources.push(candidate.source);
+      try {
+        const currentSummary = await requestCursorJson<CursorUsageSummary>("/api/usage-summary", candidate.header);
+        if (!currentSummary) {
+          continue;
+        }
+
+        const currentUser = await requestCursorJson<CursorUserInfo>("/api/auth/me", candidate.header, {
+          allowUnauthorized: true,
+        });
+        const userIdForLegacy = safeString(currentUser?.sub);
+        const currentLegacyUsage = userIdForLegacy
+          ? await requestCursorJson<CursorLegacyUsageResponse>(
+              `/api/usage?user=${encodeURIComponent(userIdForLegacy)}`,
+              candidate.header,
+              {
+                allowUnauthorized: true,
+              },
+            )
+          : undefined;
+
+        summary = currentSummary;
+        user = currentUser;
+        legacyUsage = currentLegacyUsage;
+        selectedCookie = candidate;
+        selectedAuthSource = candidate.source;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
         continue;
       }
-
-      const currentUser = await requestCursorJson<CursorUserInfo>("/api/auth/me", candidate.header, {
-        allowUnauthorized: true,
-      });
-      const userIdForLegacy = safeString(currentUser?.sub);
-      const currentLegacyUsage = userIdForLegacy
-        ? await requestCursorJson<CursorLegacyUsageResponse>(
-            `/api/usage?user=${encodeURIComponent(userIdForLegacy)}`,
-            candidate.header,
-            {
-              allowUnauthorized: true,
-            },
-          )
-        : undefined;
-
-      summary = currentSummary;
-      user = currentUser;
-      legacyUsage = currentLegacyUsage;
-      selectedCookie = candidate;
-      break;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      continue;
     }
   }
 
-  if (!summary || !selectedCookie) {
+  if (!summary && sourceMode === "auto") {
+    attemptedSources.push(CURSOR_DESKTOP_AUTH_SOURCE);
+    try {
+      const desktopSnapshot = await fetchCursorDesktopDashboardSnapshot();
+      summary = desktopSnapshot.summary;
+      user = desktopSnapshot.user;
+      legacyUsage = undefined;
+      selectedAuthSource = desktopSnapshot.source;
+      dashboardRawPayload = desktopSnapshot.rawPayload;
+      planLabelOverride = desktopSnapshot.planLabel;
+    } catch (error) {
+      desktopFallbackError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (!summary) {
+    if (candidates.length === 0 && sourceMode === "manual") {
+      throw new Error(
+        `Cursor Cookie Source is manual, but no valid Cursor Cookie Header is configured (${diagnosticsText}).`,
+      );
+    }
+    if (candidates.length === 0 && resolution.diagnostics.browserLockedDatabases) {
+      throw new Error(
+        `No Cursor cookie session found. Cursor browser cookie databases appear locked by a running process. Close Cursor completely once, then refresh (${diagnosticsText}).`,
+      );
+    }
+    if (candidates.length === 0 && lastBrowserDiscoveryHasChromiumV20) {
+      throw new Error(
+        `Cursor browser cookies are Chrome app-bound (\`v20\`) and cannot be auto-read here. Use Manual mode and paste a Cookie header from cursor.com (${diagnosticsText}).`,
+      );
+    }
     const attempted = attemptedSources.length > 0 ? ` Tried sources: ${attemptedSources.join(", ")}.` : "";
-    const reason = lastError?.message ?? "Cursor cookie is invalid/expired. Sign in to cursor.com and refresh.";
+    const reason = lastError?.message ?? "Cursor cookie/auth is invalid or unavailable.";
+    const desktopReason = desktopFallbackError ? ` Desktop fallback: ${desktopFallbackError.message}.` : "";
     const v20Hint =
       lastBrowserDiscoveryHasChromiumV20 && sourceMode === "auto"
         ? " Browser cookies appear app-bound (`v20`); use Manual mode with a copied Cookie header."
         : "";
-    throw new Error(`${reason}${attempted}${v20Hint}`);
+    throw new Error(`${reason}${attempted} Checked: ${diagnosticsText}.${desktopReason}${v20Hint}`);
   }
 
-  if (options.onCookieResolved) {
+  if (selectedCookie && options.onCookieResolved) {
     await options.onCookieResolved(selectedCookie.header, selectedCookie.source);
   }
 
   const quotas = mapCursorUsageToQuotas(summary, legacyUsage);
-  const planLabel = toMembershipLabel(summary.membershipType ?? summary.membership_type) ?? "Session";
+  const planLabel =
+    toMembershipLabel(planLabelOverride ?? summary.membershipType ?? summary.membership_type) ?? "Session";
   const email = safeString(user?.email);
   const billingStart = parseDateLike(summary.billingCycleStart ?? summary.billing_cycle_start);
   const billingEnd = parseDateLike(summary.billingCycleEnd ?? summary.billing_cycle_end);
@@ -965,8 +1659,8 @@ export async function fetchCursorSnapshot(input?: string | CursorFetchOptions): 
         id: "usage-mode",
         title: "Usage Mode",
         items: [
-          { label: "Cookie source mode", value: sourceMode },
-          { label: "Cookie source", value: selectedCookie.source },
+          { label: "Auth mode", value: sourceMode },
+          { label: "Auth source", value: selectedAuthSource ?? "unknown" },
           { label: "Auto model usage", value: autoMessage ?? "n/a" },
           { label: "Named model usage", value: namedMessage ?? "n/a" },
         ],
@@ -976,7 +1670,9 @@ export async function fetchCursorSnapshot(input?: string | CursorFetchOptions): 
       summary,
       user,
       legacyUsage,
-      cookieSource: selectedCookie.source,
+      authSource: selectedAuthSource,
+      cookieSource: selectedCookie?.source,
+      dashboard: dashboardRawPayload,
     },
     staleAfterSeconds: 2 * 60 * 60,
     resetPolicy: "Monthly reset at Cursor billing cycle end.",

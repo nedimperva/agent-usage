@@ -66,7 +66,7 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
    - Optional: set `Copilot API Token` in extension preferences
 4. Cursor
    - Set `Cursor Cookie Source` to `Auto` (recommended) or `Manual`.
-   - In `Auto`, the extension tries manual header, cached cookie, env var, and browser import.
+   - In `Auto`, the extension tries manual header, cached cookie, browser import (Chrome/Edge/Brave + Cursor desktop profile), env var, and Cursor desktop auth token fallback.
    - In `Manual`, set `Cursor Cookie Header` from an authenticated `cursor.com` request.
    - Accepted formats:
      - Full copied request headers (the extension extracts `Cookie:` automatically)
@@ -129,6 +129,7 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
    - `npm run dev`
 2. If Codex or Claude is unavailable, refresh login with `codex login` or `claude login`, then refresh the dashboard.
 3. If Cursor is unavailable, switch Cursor Cookie Source to `Auto` or update `Cursor Cookie Header` manually.
+   - If error mentions locked Cursor cookie databases, fully quit Cursor once and refresh so Auto can import a session.
 4. If Gemini is unavailable, run `gemini` to refresh OAuth credentials, then refresh.
 5. If Antigravity is unavailable, keep Antigravity running for auto-detect, or set server URL + CSRF token in preferences, then refresh.
 6. If Copilot is unavailable, use device login again or set a fresh token.

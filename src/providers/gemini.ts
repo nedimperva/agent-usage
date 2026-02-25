@@ -20,6 +20,12 @@ interface GeminiOAuthCredentials {
   access_token?: unknown;
   id_token?: unknown;
   expiry_date?: unknown;
+  refresh_token?: unknown;
+  client_id?: unknown;
+  client_secret?: unknown;
+  token_uri?: unknown;
+  token_type?: unknown;
+  scope?: unknown;
 }
 
 interface GeminiQuotaBucket {
@@ -49,6 +55,24 @@ interface GeminiProjectsResponse {
 interface GeminiJWTClaims {
   email?: string;
   hostedDomain?: string;
+}
+
+interface GeminiOAuthRefreshResponse {
+  access_token?: unknown;
+  id_token?: unknown;
+  expires_in?: unknown;
+  token_type?: unknown;
+  scope?: unknown;
+}
+
+interface GeminiResolvedCredentials {
+  accessToken: string;
+  idToken?: string;
+  expiryDate?: Date;
+  source: string;
+  manual: boolean;
+  credsPath?: string;
+  oauthCreds?: GeminiOAuthCredentials;
 }
 
 interface GeminiModelQuotaPoint {
@@ -117,10 +141,171 @@ function parseExpiryDate(value: unknown): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+function extractJWTValue(idToken: string | undefined, key: string): unknown {
+  if (!idToken) {
+    return undefined;
+  }
+
+  const segments = idToken.split(".");
+  if (segments.length < 2) {
+    return undefined;
+  }
+
+  const payload = segments[1].replace(/-/g, "+").replace(/_/g, "/");
+  const padded = payload + "=".repeat((4 - (payload.length % 4 || 4)) % 4);
+
+  try {
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded) as Record<string, unknown>;
+    return parsed[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function deriveGeminiOAuthClientId(creds: GeminiOAuthCredentials): string | undefined {
+  const explicit = safeString(creds.client_id);
+  if (explicit) {
+    return explicit;
+  }
+
+  const aud = extractJWTValue(safeString(creds.id_token), "aud");
+  if (typeof aud === "string" && aud.trim()) {
+    return aud.trim();
+  }
+  if (Array.isArray(aud)) {
+    for (const value of aud) {
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+
+  const azp = extractJWTValue(safeString(creds.id_token), "azp");
+  if (typeof azp === "string" && azp.trim()) {
+    return azp.trim();
+  }
+
+  return undefined;
+}
+
+function shouldRefreshGeminiToken(expiryDate?: Date): boolean {
+  if (!expiryDate) {
+    return false;
+  }
+  const refreshSkewMs = 90 * 1000;
+  return expiryDate.getTime() <= Date.now() + refreshSkewMs;
+}
+
+async function refreshGeminiOAuthAccessToken(
+  credsPath: string,
+  creds: GeminiOAuthCredentials,
+): Promise<GeminiResolvedCredentials | undefined> {
+  const refreshToken = safeString(creds.refresh_token);
+  if (!refreshToken) {
+    return undefined;
+  }
+
+  const tokenUri = safeString(creds.token_uri) ?? "https://oauth2.googleapis.com/token";
+  const clientId = deriveGeminiOAuthClientId(creds);
+  const clientSecret = safeString(creds.client_secret);
+
+  const attempts: Array<{ clientId?: string; clientSecret?: string }> = [];
+  if (clientId && clientSecret) {
+    attempts.push({ clientId, clientSecret });
+  }
+  if (clientId) {
+    attempts.push({ clientId });
+  }
+  attempts.push({});
+
+  const deduped = new Map<string, { clientId?: string; clientSecret?: string }>();
+  for (const attempt of attempts) {
+    const key = `${attempt.clientId ?? ""}|${attempt.clientSecret ?? ""}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, attempt);
+    }
+  }
+
+  for (const attempt of deduped.values()) {
+    const body = new URLSearchParams();
+    body.set("grant_type", "refresh_token");
+    body.set("refresh_token", refreshToken);
+    if (attempt.clientId) {
+      body.set("client_id", attempt.clientId);
+    }
+    if (attempt.clientSecret) {
+      body.set("client_secret", attempt.clientSecret);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(tokenUri, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+    } catch {
+      continue;
+    }
+
+    if (!response.ok) {
+      continue;
+    }
+
+    let payload: GeminiOAuthRefreshResponse;
+    try {
+      payload = (await response.json()) as GeminiOAuthRefreshResponse;
+    } catch {
+      continue;
+    }
+
+    const accessToken = safeString(payload.access_token);
+    if (!accessToken) {
+      continue;
+    }
+
+    const expiresInSeconds = parseOptionalNumber(payload.expires_in);
+    const expiryDate =
+      expiresInSeconds !== undefined && Number.isFinite(expiresInSeconds)
+        ? new Date(Date.now() + Math.max(0, expiresInSeconds) * 1000)
+        : parseExpiryDate(creds.expiry_date);
+    const nextIdToken = safeString(payload.id_token) ?? safeString(creds.id_token);
+
+    const updatedCreds: Record<string, unknown> = {
+      ...(creds as Record<string, unknown>),
+      access_token: accessToken,
+      token_type: safeString(payload.token_type) ?? safeString(creds.token_type) ?? "Bearer",
+      scope: safeString(payload.scope) ?? safeString(creds.scope),
+      id_token: nextIdToken,
+    };
+    if (expiryDate) {
+      updatedCreds.expiry_date = expiryDate.getTime();
+    }
+
+    await fs.writeFile(credsPath, `${JSON.stringify(updatedCreds, null, 2)}\n`, "utf8");
+
+    return {
+      accessToken: normalizeAccessToken(accessToken),
+      idToken: nextIdToken,
+      expiryDate,
+      source: `${credsPath} (refreshed)`,
+      manual: false,
+      credsPath,
+      oauthCreds: updatedCreds as GeminiOAuthCredentials,
+    };
+  }
+
+  return undefined;
+}
+
 async function loadGeminiAccessToken(
   manualToken: string | undefined,
   configDir: string,
-): Promise<{ accessToken: string; idToken?: string; expiryDate?: Date; source: string }> {
+): Promise<GeminiResolvedCredentials> {
   const direct = manualToken?.trim();
   if (direct) {
     const normalized = normalizeAccessToken(direct);
@@ -130,6 +315,7 @@ async function loadGeminiAccessToken(
     return {
       accessToken: normalized,
       source: "manual preference",
+      manual: true,
     };
   }
 
@@ -146,8 +332,14 @@ async function loadGeminiAccessToken(
   }
 
   const expiryDate = parseExpiryDate(creds.expiry_date);
+  if (shouldRefreshGeminiToken(expiryDate)) {
+    const refreshed = await refreshGeminiOAuthAccessToken(credsPath, creds);
+    if (refreshed) {
+      return refreshed;
+    }
+  }
   if (expiryDate && expiryDate.getTime() <= Date.now()) {
-    throw new Error("Gemini OAuth token is expired. Re-run `gemini` to refresh authentication.");
+    throw new Error("Gemini OAuth token is expired and could not be refreshed. Re-run `gemini` to authenticate.");
   }
 
   return {
@@ -155,6 +347,9 @@ async function loadGeminiAccessToken(
     idToken: safeString(creds.id_token),
     expiryDate,
     source: credsPath,
+    manual: false,
+    credsPath,
+    oauthCreds: creds,
   };
 }
 
@@ -358,23 +553,43 @@ export async function fetchGeminiSnapshot(manualAccessToken?: string): Promise<P
     }
   }
 
-  const credentials = await loadGeminiAccessToken(manual, configDir);
-  const claims = decodeJWTClaims(credentials.idToken);
-  const codeAssist = await loadGeminiCodeAssistStatus(credentials.accessToken);
-  const projectId = codeAssist.projectId ?? (await discoverGeminiProjectId(credentials.accessToken));
-  const quotaBody = projectId ? { project: projectId } : {};
+  let credentials = await loadGeminiAccessToken(manual, configDir);
+  let payload: GeminiQuotaResponse | undefined;
+  let codeAssist: GeminiCodeAssistStatus = {};
+  let projectId: string | undefined;
 
-  const quotaResponse = await fetch(GEMINI_QUOTA_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${credentials.accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(quotaBody),
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    codeAssist = await loadGeminiCodeAssistStatus(credentials.accessToken);
+    projectId = codeAssist.projectId ?? (await discoverGeminiProjectId(credentials.accessToken));
+    const quotaBody = projectId ? { project: projectId } : {};
 
-  if (!quotaResponse.ok) {
+    const quotaResponse = await fetch(GEMINI_QUOTA_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(quotaBody),
+    });
+
+    if (quotaResponse.ok) {
+      payload = (await quotaResponse.json()) as GeminiQuotaResponse;
+      break;
+    }
+
+    if ((quotaResponse.status === 401 || quotaResponse.status === 403) && !credentials.manual && attempt === 0) {
+      const refreshed =
+        credentials.credsPath && credentials.oauthCreds
+          ? await refreshGeminiOAuthAccessToken(credentials.credsPath, credentials.oauthCreds)
+          : undefined;
+      if (refreshed) {
+        credentials = refreshed;
+        continue;
+      }
+      throw new Error("Gemini OAuth token is invalid/expired and could not be refreshed. Re-run `gemini`.");
+    }
+
     if (quotaResponse.status === 401 || quotaResponse.status === 403) {
       throw new Error("Gemini OAuth token is invalid or expired. Re-run `gemini` and refresh.");
     }
@@ -382,7 +597,11 @@ export async function fetchGeminiSnapshot(manualAccessToken?: string): Promise<P
     throw new Error(`Gemini quota API ${quotaResponse.status}: ${body.slice(0, 220)}`);
   }
 
-  const payload = (await quotaResponse.json()) as GeminiQuotaResponse;
+  if (!payload) {
+    throw new Error("Gemini quota request failed after refresh retry.");
+  }
+
+  const claims = decodeJWTClaims(credentials.idToken);
   const quotas = mapGeminiUsageToQuotas(payload);
   if (quotas.length === 0) {
     throw new Error("Gemini quota API returned no parseable model buckets.");
