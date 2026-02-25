@@ -68,12 +68,12 @@ describe("summarizeProviderSnapshot", () => {
     expect(summary.status).toBe("critical");
     expect(summary.title).toBe("Codex (Pro)");
     expect(summary.subtitle).toContain("Weekly Limit: 8%");
-    expect(summary.subtitle).toContain("5 Hour Limit: 20%");
+    expect(summary.subtitle).toContain("+1 more");
     expect(summary.subtitle).not.toContain("critical");
     expect(summary.subtitle).not.toContain("warning");
   });
 
-  it("summarizes first two limits and extra count for healthy snapshots", () => {
+  it("summarizes a primary limit and extra count for healthy snapshots", () => {
     const summary = summarizeProviderSnapshot(
       snapshot("claude", {
         quotas: [
@@ -91,8 +91,7 @@ describe("summarizeProviderSnapshot", () => {
     );
 
     expect(summary.subtitle).toContain("5 Hour Limit: 100%");
-    expect(summary.subtitle).toContain("Weekly Limit: 76%");
-    expect(summary.subtitle).toContain("+1 more");
+    expect(summary.subtitle).toContain("+2 more");
   });
 
   it("keeps cursor quota summary before highlight details", () => {
@@ -109,9 +108,8 @@ describe("summarizeProviderSnapshot", () => {
     const namedIndex = summary.subtitle.indexOf("Named: 38%");
     expect(usageIndex).toBeGreaterThanOrEqual(0);
     expect(autoIndex).toBeGreaterThanOrEqual(0);
-    expect(namedIndex).toBeGreaterThanOrEqual(0);
     expect(usageIndex).toBeLessThan(autoIndex);
-    expect(autoIndex).toBeLessThan(namedIndex);
+    expect(namedIndex).toBeLessThan(0);
   });
 
   it("keeps gemini quota summary before tier highlights", () => {

@@ -97,27 +97,24 @@ function quotaSummaryText(snapshot: ProviderUsageSnapshot): string {
     return "No limits available";
   }
 
-  const primary = snapshot.quotas.slice(0, 2);
-  const summaries = primary.map((quota) => {
-    if (quota.remainingPercent !== undefined && Number.isFinite(quota.remainingPercent)) {
-      const rounded = Math.round(quota.remainingPercent * 10) / 10;
-      const percentText = Number.isInteger(rounded) ? `${rounded.toFixed(0)}%` : `${rounded.toFixed(1)}%`;
-      return `${quota.label}: ${percentText}`;
+  let primary = snapshot.quotas[0];
+  for (const quota of snapshot.quotas) {
+    if (statusRank(quota.status) > statusRank(primary.status)) {
+      primary = quota;
     }
-
-    return `${quota.label}: ${quota.remainingDisplay}`;
-  });
-
-  const extraCount = snapshot.quotas.length - primary.length;
-  if (extraCount > 0) {
-    summaries.push(`+${extraCount} more`);
   }
 
-  return summaries.join(", ");
+  if (primary.remainingPercent !== undefined && Number.isFinite(primary.remainingPercent)) {
+    const rounded = Math.round(primary.remainingPercent * 10) / 10;
+    const percentText = Number.isInteger(rounded) ? `${rounded.toFixed(0)}%` : `${rounded.toFixed(1)}%`;
+    return `${primary.label}: ${percentText}`;
+  }
+
+  return `${primary.label}: ${primary.remainingDisplay}`;
 }
 
 export function isUnavailableSnapshot(snapshot: ProviderUsageSnapshot): boolean {
-  return snapshot.source === "manual" && snapshot.quotas.some((quota) => quota.label === "Unavailable");
+  return snapshot.quotas.some((quota) => quota.label === "Unavailable");
 }
 
 export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now = new Date()): ProviderRowSummary {
@@ -126,7 +123,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
     : providerTitle(snapshot.provider);
   const updatedText = `Updated ${formatRelativeTimestamp(snapshot.fetchedAt, now.getTime())}`;
   const limitsText = quotaSummaryText(snapshot);
-  const highlightsText = snapshot.highlights?.filter((entry) => entry.trim().length > 0).join(" | ");
+  const highlightsText = snapshot.highlights?.find((entry) => entry.trim().length > 0);
 
   if (isUnavailableSnapshot(snapshot)) {
     const reason = snapshot.quotas.find((quota) => quota.label === "Unavailable")?.remainingDisplay;
@@ -149,11 +146,13 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
   return {
     provider: snapshot.provider,
     title,
-    subtitle: highlightsText
-      ? snapshot.provider === "gemini" || snapshot.provider === "cursor"
-        ? `${limitsText}. ${highlightsText}. ${updatedText}.`
-        : `${highlightsText}. ${limitsText}. ${updatedText}.`
-      : `${limitsText}. ${updatedText}.`,
+    subtitle: `${[
+      limitsText,
+      snapshot.quotas.length > 1 ? `+${snapshot.quotas.length - 1} more` : undefined,
+      highlightsText,
+    ]
+      .filter((part): part is string => !!part)
+      .join(" | ")}. ${updatedText}.`,
     status,
   };
 }
