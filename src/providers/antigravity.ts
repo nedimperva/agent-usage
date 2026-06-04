@@ -1,4 +1,7 @@
 import { execFile } from "child_process";
+import { open, readdir, stat } from "fs/promises";
+import { homedir } from "os";
+import { join } from "path";
 import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
 import {
   formatPercent,
@@ -64,8 +67,22 @@ interface AntigravityProcessInfo {
   commandLine: string;
 }
 
+export interface AntigravityQuotaLogHint {
+  logPath: string;
+  observedAt: string;
+  resetInSeconds: number;
+  resetInDisplay: string;
+  estimatedResetAt: string;
+  message: string;
+}
+
 const USER_STATUS_PATH = "/exa.language_server_pb.LanguageServerService/GetUserStatus";
 const COMMAND_MODELS_PATH = "/exa.language_server_pb.LanguageServerService/GetCommandModelConfigs";
+const ANTIGRAVITY_LOG_FILE_NAME = "Antigravity.log";
+const ANTIGRAVITY_LOG_TAIL_BYTES = 64 * 1024;
+const ANTIGRAVITY_LOG_SEARCH_LIMIT = 8;
+const ANTIGRAVITY_LOG_ADVISORY_SOURCE = "Recent local logs";
+const ANTIGRAVITY_LOG_ADVISORY_STALE_AFTER_SECONDS = 12 * 60 * 60;
 
 function normalizeBaseUrl(value: string): string {
   const normalized = value.trim();
@@ -127,6 +144,270 @@ function parseFlagFromCommandLine(commandLine: string, flag: string): string | u
   const match = commandLine.match(new RegExp(`${escaped}(?:=|\\s+)(\\S+)`, "i"));
   const value = match?.[1]?.trim().replace(/^['"]|['"]$/g, "");
   return value ? value : undefined;
+}
+
+function formatDurationPartsAsDisplay(raw: string): string {
+  const parts = Array.from(raw.matchAll(/(\d+)\s*([dhms])/gi)).map((match) => `${match[1]}${match[2].toLowerCase()}`);
+  return parts.join(" ");
+}
+
+export function parseAntigravityResetDuration(raw: string): number | undefined {
+  const compact = raw.replace(/\s+/g, "");
+  if (!compact) {
+    return undefined;
+  }
+
+  const matches = Array.from(compact.matchAll(/(\d+)([dhms])/gi));
+  if (matches.length === 0 || matches.map((match) => match[0]).join("") !== compact) {
+    return undefined;
+  }
+
+  let totalSeconds = 0;
+  for (const match of matches) {
+    const value = Number(match[1]);
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+
+    const unit = match[2].toLowerCase();
+    if (unit === "d") {
+      totalSeconds += value * 24 * 60 * 60;
+      continue;
+    }
+    if (unit === "h") {
+      totalSeconds += value * 60 * 60;
+      continue;
+    }
+    if (unit === "m") {
+      totalSeconds += value * 60;
+      continue;
+    }
+    totalSeconds += value;
+  }
+
+  return totalSeconds > 0 ? totalSeconds : undefined;
+}
+
+function parseAntigravityLogTimestamp(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = new Date(trimmed.replace(" ", "T"));
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+export function extractLatestAntigravityQuotaLogHint(
+  logText: string,
+  logPath: string,
+  now = new Date(),
+): AntigravityQuotaLogHint | undefined {
+  let latestHint: AntigravityQuotaLogHint | undefined;
+
+  for (const rawLine of logText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (
+      !line ||
+      !line.toLowerCase().includes("resource_exhausted") ||
+      !line.toLowerCase().includes("quota will reset after")
+    ) {
+      continue;
+    }
+
+    const durationMatch = line.match(/quota will reset after\s+([0-9dhms\s]+)/i);
+    if (!durationMatch) {
+      continue;
+    }
+
+    const resetInSeconds = parseAntigravityResetDuration(durationMatch[1]);
+    if (resetInSeconds === undefined) {
+      continue;
+    }
+
+    const timestampMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3})?)/);
+    const observedAt = timestampMatch ? parseAntigravityLogTimestamp(timestampMatch[1]) : undefined;
+    if (!observedAt) {
+      continue;
+    }
+
+    const observedMs = Date.parse(observedAt);
+    if (Number.isNaN(observedMs)) {
+      continue;
+    }
+
+    const estimatedResetAt = new Date(observedMs + resetInSeconds * 1000).toISOString();
+    if (Date.parse(estimatedResetAt) <= now.getTime()) {
+      continue;
+    }
+
+    const candidate: AntigravityQuotaLogHint = {
+      logPath,
+      observedAt,
+      resetInSeconds,
+      resetInDisplay: formatDurationPartsAsDisplay(durationMatch[1]),
+      estimatedResetAt,
+      message: line,
+    };
+
+    if (!latestHint || Date.parse(candidate.observedAt) > Date.parse(latestHint.observedAt)) {
+      latestHint = candidate;
+    }
+  }
+
+  return latestHint;
+}
+
+async function readFileTail(filePath: string, maxBytes = ANTIGRAVITY_LOG_TAIL_BYTES): Promise<string | undefined> {
+  const fileHandle = await open(filePath, "r");
+  try {
+    const fileInfo = await fileHandle.stat();
+    if (!fileInfo.isFile() || fileInfo.size <= 0) {
+      return undefined;
+    }
+
+    const bytesToRead = Math.min(fileInfo.size, maxBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    await fileHandle.read(buffer, 0, bytesToRead, fileInfo.size - bytesToRead);
+    return buffer.toString("utf8");
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+async function listAntigravityLogFiles(root: string, depth = 0): Promise<Array<{ path: string; mtimeMs: number }>> {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const files: Array<{ path: string; mtimeMs: number }> = [];
+
+  for (const entry of entries) {
+    const entryPath = join(root, entry.name);
+    if (entry.isFile() && entry.name === ANTIGRAVITY_LOG_FILE_NAME) {
+      const fileInfo = await stat(entryPath).catch(() => undefined);
+      if (fileInfo?.isFile()) {
+        files.push({ path: entryPath, mtimeMs: fileInfo.mtimeMs });
+      }
+      continue;
+    }
+
+    if (entry.isDirectory() && depth < 6) {
+      files.push(...(await listAntigravityLogFiles(entryPath, depth + 1)));
+    }
+  }
+
+  return files;
+}
+
+function antigravityLogRoots(): string[] {
+  const roots = new Set<string>();
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA?.trim();
+    if (appData) {
+      roots.add(join(appData, "Antigravity", "logs"));
+    }
+  } else if (process.platform === "darwin") {
+    roots.add(join(homedir(), "Library", "Application Support", "Antigravity", "logs"));
+  } else {
+    const configRoot = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+    roots.add(join(configRoot, "Antigravity", "logs"));
+  }
+
+  return Array.from(roots.values());
+}
+
+async function findAntigravityQuotaLogHint(now = new Date()): Promise<AntigravityQuotaLogHint | undefined> {
+  let latestHint: AntigravityQuotaLogHint | undefined;
+
+  for (const root of antigravityLogRoots()) {
+    const files = (await listAntigravityLogFiles(root))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, ANTIGRAVITY_LOG_SEARCH_LIMIT);
+
+    for (const file of files) {
+      const logText = await readFileTail(file.path).catch(() => undefined);
+      if (!logText) {
+        continue;
+      }
+
+      const hint = extractLatestAntigravityQuotaLogHint(logText, file.path, now);
+      if (!hint) {
+        continue;
+      }
+
+      if (!latestHint || Date.parse(hint.observedAt) > Date.parse(latestHint.observedAt)) {
+        latestHint = hint;
+      }
+    }
+  }
+
+  return latestHint;
+}
+
+export function buildAntigravityLogAdvisorySnapshot(
+  hint: AntigravityQuotaLogHint,
+  liveError: string,
+): ProviderUsageSnapshot {
+  return {
+    provider: "antigravity",
+    fetchedAt: hint.observedAt,
+    quotas: [
+      {
+        id: "antigravity-log-advisory",
+        label: "Recent exhaustion hint",
+        remainingDisplay: `Recent local logs show capacity exhausted. Estimated reset ${hint.estimatedResetAt}. Advisory only.`,
+        resetAt: hint.estimatedResetAt,
+        status: "warning",
+      },
+    ],
+    highlights: [
+      `Recent log hint: capacity exhausted, reset estimated ${hint.estimatedResetAt}.`,
+      "Advisory only: this comes from the last local RESOURCE_EXHAUSTED log, not a live remaining quota percentage.",
+      `Live quotas unavailable: ${liveError}`,
+    ],
+    source: "manual",
+    errors: [`Live quotas unavailable: ${liveError}`],
+    metadataSections: [
+      {
+        id: "usage-mode",
+        title: "Usage Mode",
+        items: [
+          { label: "Source", value: ANTIGRAVITY_LOG_ADVISORY_SOURCE },
+          { label: "Observed", value: hint.observedAt },
+          { label: "Estimated Reset", value: hint.estimatedResetAt },
+          {
+            label: "Coverage",
+            value: "Last exhaustion/reset hint only",
+            subtitle: "Not a live remaining percentage",
+          },
+        ],
+      },
+    ],
+    rawPayload: {
+      logHint: hint,
+      liveError,
+    },
+    staleAfterSeconds: ANTIGRAVITY_LOG_ADVISORY_STALE_AFTER_SECONDS,
+    resetPolicy: "Advisory only: reset estimate inferred from the last local quota exhaustion log.",
+  };
+}
+
+export function isAntigravityLogAdvisorySnapshot(snapshot: ProviderUsageSnapshot): boolean {
+  if (snapshot.provider !== "antigravity") {
+    return false;
+  }
+
+  return (snapshot.metadataSections ?? []).some(
+    (section) =>
+      section.id === "usage-mode" &&
+      section.items.some((item) => item.label === "Source" && item.value === ANTIGRAVITY_LOG_ADVISORY_SOURCE),
+  );
+}
+
+async function fallbackToAntigravityLogAdvisory(liveError: string): Promise<ProviderUsageSnapshot | undefined> {
+  const hint = await findAntigravityQuotaLogHint();
+  if (!hint) {
+    return undefined;
+  }
+  return buildAntigravityLogAdvisorySnapshot(hint, liveError);
 }
 
 export function extractAntigravityConnectionFromCommandLine(commandLine: string): {
@@ -628,10 +909,20 @@ export async function fetchAntigravitySnapshot(baseUrl?: string, csrfToken?: str
   const token = manualToken || discovered?.csrfToken;
 
   if (!normalizedBase) {
-    throw new Error("No Antigravity Server URL found. Set preference or keep Antigravity running for auto-detect.");
+    const liveError = "No Antigravity Server URL found. Set preference or keep Antigravity running for auto-detect.";
+    const advisory = await fallbackToAntigravityLogAdvisory(liveError);
+    if (advisory) {
+      return advisory;
+    }
+    throw new Error(liveError);
   }
   if (!token) {
-    throw new Error("No Antigravity CSRF token found. Set preference or keep Antigravity running for auto-detect.");
+    const liveError = "No Antigravity CSRF token found. Set preference or keep Antigravity running for auto-detect.";
+    const advisory = await fallbackToAntigravityLogAdvisory(liveError);
+    if (advisory) {
+      return advisory;
+    }
+    throw new Error(liveError);
   }
 
   let connectionSource =
@@ -654,11 +945,25 @@ export async function fetchAntigravitySnapshot(baseUrl?: string, csrfToken?: str
       (discoveredBase !== normalizedBase || discoveredToken !== token);
 
     if (!shouldRetryWithAuto) {
+      const advisory = await fallbackToAntigravityLogAdvisory(error instanceof Error ? error.message : String(error));
+      if (advisory) {
+        return advisory;
+      }
       throw error;
     }
 
-    request = await tryFetch(discoveredBase, discoveredToken);
-    connectionSource = discovered?.source ?? "auto";
+    try {
+      request = await tryFetch(discoveredBase, discoveredToken);
+      connectionSource = discovered?.source ?? "auto";
+    } catch (retryError) {
+      const advisory = await fallbackToAntigravityLogAdvisory(
+        retryError instanceof Error ? retryError.message : String(retryError),
+      );
+      if (advisory) {
+        return advisory;
+      }
+      throw retryError;
+    }
   }
 
   let quotas = mapAntigravityResponseToQuotas(request.payload);
@@ -686,7 +991,12 @@ export async function fetchAntigravitySnapshot(baseUrl?: string, csrfToken?: str
   }
 
   if (quotas.length === 0) {
-    throw new Error("No parseable Antigravity quota models found.");
+    const liveError = "No parseable Antigravity quota models found.";
+    const advisory = await fallbackToAntigravityLogAdvisory(liveError);
+    if (advisory) {
+      return advisory;
+    }
+    throw new Error(liveError);
   }
 
   const email = safeString(request.payload.userStatus?.email);

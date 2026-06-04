@@ -2,8 +2,6 @@ import { ProviderUsageSnapshot, QuotaItem } from "../models/usage";
 import { parseDateLike, parseOptionalNumber, safeString, statusFromRemainingPercent } from "../lib/normalize";
 
 const GITHUB_BASE_URL = "https://api.github.com";
-const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
-const GITHUB_DEVICE_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const COPILOT_VSCODE_CLIENT_ID = "Iv1.b507a08c87ecfe98";
 
 export interface CopilotDeviceCodeResponse {
@@ -44,6 +42,23 @@ export interface CopilotSnapshotContext {
   tokenSource?: string;
   lastSuccessAt?: string;
   recentDeviceEvents?: string[];
+  githubEnterpriseBaseUrl?: string;
+}
+
+function resolveGitHubUrls(baseUrl?: string): { webBase: string; apiBase: string } {
+  const raw = baseUrl?.trim() || process.env.GITHUB_ENTERPRISE_URL?.trim() || process.env.GITHUB_HOST?.trim();
+  if (!raw) {
+    return { webBase: "https://github.com", apiBase: GITHUB_BASE_URL };
+  }
+
+  const normalized = raw.replace(/\/+$/, "");
+  if (normalized.includes("api.github.com")) {
+    return { webBase: "https://github.com", apiBase: normalized };
+  }
+  return {
+    webBase: normalized,
+    apiBase: `${normalized}/api/v3`,
+  };
 }
 
 function normalizePercent(value: number | undefined): number | undefined {
@@ -82,6 +97,16 @@ function nextCopilotMonthlyResetAt(now: Date): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0)).toISOString();
 }
 
+function copilotMonthlyWindowStart(resetAt: string): string | undefined {
+  const resetAtMs = Date.parse(resetAt);
+  if (Number.isNaN(resetAtMs)) {
+    return undefined;
+  }
+
+  const resetDate = new Date(resetAtMs);
+  return new Date(Date.UTC(resetDate.getUTCFullYear(), resetDate.getUTCMonth() - 1, 1, 0, 0, 0, 0)).toISOString();
+}
+
 export function extractCopilotQuotaItems(payload: unknown, now = new Date()): QuotaItem[] {
   const usage = (payload as CopilotInternalResponse | undefined) ?? {};
   const premiumSnapshot = usage.quotaSnapshots?.premiumInteractions ?? usage.quota_snapshots?.premium_interactions;
@@ -92,23 +117,37 @@ export function extractCopilotQuotaItems(payload: unknown, now = new Date()): Qu
   const quotas: QuotaItem[] = [];
 
   if (premiumRemaining !== undefined) {
+    const premiumResetAt = readQuotaResetAt(premiumSnapshot) ?? defaultResetAt;
+    const premiumWindowStartAt = copilotMonthlyWindowStart(premiumResetAt);
     quotas.push({
       id: "copilot-premium",
       label: "Premium Requests",
       remainingPercent: premiumRemaining,
       remainingDisplay: `${premiumRemaining.toFixed(1).replace(/\.0$/, "")}% left`,
-      resetAt: readQuotaResetAt(premiumSnapshot) ?? defaultResetAt,
+      resetAt: premiumResetAt,
+      windowStartAt: premiumWindowStartAt,
+      windowDurationSeconds:
+        premiumWindowStartAt && premiumResetAt
+          ? Math.max(0, Math.round((Date.parse(premiumResetAt) - Date.parse(premiumWindowStartAt)) / 1000))
+          : undefined,
       status: statusFromRemainingPercent(premiumRemaining),
     });
   }
 
   if (chatRemaining !== undefined) {
+    const chatResetAt = readQuotaResetAt(chatSnapshot) ?? defaultResetAt;
+    const chatWindowStartAt = copilotMonthlyWindowStart(chatResetAt);
     quotas.push({
       id: "copilot-chat",
       label: "Chat Quota",
       remainingPercent: chatRemaining,
       remainingDisplay: `${chatRemaining.toFixed(1).replace(/\.0$/, "")}% left`,
-      resetAt: readQuotaResetAt(chatSnapshot) ?? defaultResetAt,
+      resetAt: chatResetAt,
+      windowStartAt: chatWindowStartAt,
+      windowDurationSeconds:
+        chatWindowStartAt && chatResetAt
+          ? Math.max(0, Math.round((Date.parse(chatResetAt) - Date.parse(chatWindowStartAt)) / 1000))
+          : undefined,
       status: statusFromRemainingPercent(chatRemaining),
     });
   }
@@ -146,14 +185,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function requestCopilotDeviceCode(): Promise<CopilotDeviceCodeResponse> {
+export async function requestCopilotDeviceCode(githubEnterpriseBaseUrl?: string): Promise<CopilotDeviceCodeResponse> {
+  const urls = resolveGitHubUrls(githubEnterpriseBaseUrl);
   const payload = await requestJson<{
     device_code?: string;
     user_code?: string;
     verification_uri?: string;
     expires_in?: number;
     interval?: number;
-  }>(GITHUB_DEVICE_CODE_URL, {
+  }>(`${urls.webBase}/login/device/code`, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -184,9 +224,13 @@ export async function requestCopilotDeviceCode(): Promise<CopilotDeviceCodeRespo
   };
 }
 
-export async function pollCopilotDeviceToken(device: CopilotDeviceCodeResponse): Promise<string> {
+export async function pollCopilotDeviceToken(
+  device: CopilotDeviceCodeResponse,
+  githubEnterpriseBaseUrl?: string,
+): Promise<string> {
   const startedAt = Date.now();
   let intervalSec = device.interval;
+  const urls = resolveGitHubUrls(githubEnterpriseBaseUrl);
 
   while (Date.now() - startedAt < device.expiresIn * 1000) {
     await sleep(intervalSec * 1000);
@@ -194,7 +238,7 @@ export async function pollCopilotDeviceToken(device: CopilotDeviceCodeResponse):
     const response = await requestJson<{
       access_token?: string;
       error?: string;
-    }>(GITHUB_DEVICE_TOKEN_URL, {
+    }>(`${urls.webBase}/login/oauth/access_token`, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -240,7 +284,9 @@ export async function fetchCopilotSnapshot(
     throw new Error("Copilot token is missing.");
   }
 
-  const response = await fetch(`${GITHUB_BASE_URL}/copilot_internal/user`, {
+  const urls = resolveGitHubUrls(context.githubEnterpriseBaseUrl);
+  const endpoint = `${urls.apiBase}/copilot_internal/user`;
+  const response = await fetch(endpoint, {
     method: "GET",
     headers: {
       Authorization: `token ${trimmedToken}`,
@@ -284,7 +330,7 @@ export async function fetchCopilotSnapshot(
         title: "Source",
         items: [
           { label: "Source", value: "GitHub Copilot internal API" },
-          { label: "Endpoint", value: `${GITHUB_BASE_URL}/copilot_internal/user` },
+          { label: "Endpoint", value: endpoint },
           { label: "Payload keys", value: payloadKeys.join(", ") || "none" },
         ],
       },

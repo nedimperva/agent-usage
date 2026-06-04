@@ -2,13 +2,12 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "agent-usage",
   "title": "Agent Usage",
-  "description": "Track Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and optional provider usage limits in Raycast.",
+  "description": "Track Codex, Claude, Cursor, Gemini, Antigravity, Copilot, Zed, and optional provider usage limits in Raycast.",
   "icon": "extension-icon.png",
   "author": "nedim_perva",
   "keywords": [
     "usage",
     "quota",
-    "limits",
     "codex",
     "claude",
     "gemini",
@@ -16,6 +15,7 @@
     "copilot",
     "cursor",
     "openrouter",
+    "zed",
     "minimax",
     "opencode"
   ],
@@ -33,304 +33,14 @@
       "name": "agent-usage",
       "title": "Agent Usage",
       "description": "View usage snapshots and remaining limits across providers.",
-      "mode": "view",
-      "preferences": [
-        {
-          "name": "codexAuthToken",
-          "type": "password",
-          "title": "Codex Auth Token (Optional)",
-          "description": "Optional Bearer token override. Leave empty to auto-read ~/.codex/auth.json.",
-          "required": false
-        },
-        {
-          "name": "claudeAccessToken",
-          "type": "password",
-          "title": "Claude OAuth Access Token (Optional)",
-          "description": "Optional OAuth token override. Leave empty to auto-read Claude credentials file.",
-          "required": false
-        },
-        {
-          "name": "geminiAccessToken",
-          "type": "password",
-          "title": "Gemini OAuth Access Token (Optional)",
-          "description": "Optional OAuth token override. Leave empty to auto-read ~/.gemini/oauth_creds.json.",
-          "required": false
-        },
-        {
-          "name": "antigravityCsrfToken",
-          "type": "password",
-          "title": "Antigravity CSRF Token (Optional)",
-          "description": "CSRF token required by local Antigravity language server endpoints.",
-          "required": false
-        },
-        {
-          "name": "copilotApiToken",
-          "type": "password",
-          "title": "Copilot API Token (Optional)",
-          "description": "Optional manual token. You can also use device login from the command actions.",
-          "required": false
-        },
-        {
-          "name": "cursorCookieHeader",
-          "type": "password",
-          "title": "Cursor Cookie Header (Optional)",
-          "description": "Optional cookie header for Cursor web API (from an active cursor.com session).",
-          "required": false
-        },
-        {
-          "name": "cursorCookieSourceMode",
-          "type": "dropdown",
-          "title": "Cursor Cookie Source",
-          "description": "Auto tries cached/environment/browser cookies; Manual uses only Cursor Cookie Header.",
-          "default": "auto",
-          "data": [
-            {
-              "title": "Auto",
-              "value": "auto"
-            },
-            {
-              "title": "Manual",
-              "value": "manual"
-            }
-          ],
-          "required": false
-        },
-        {
-          "name": "checkProviderStatus",
-          "type": "checkbox",
-          "label": "Enable Provider Status Checks",
-          "description": "Show status highlights when providers report degraded/outage state.",
-          "default": false,
-          "required": false
-        },
-        {
-          "name": "openrouterApiKey",
-          "type": "password",
-          "title": "OpenRouter API Key (Optional)",
-          "description": "OpenRouter API key for credits and key quota endpoints.",
-          "required": false
-        },
-        {
-          "name": "zaiApiKey",
-          "type": "password",
-          "title": "z.ai API Key (Optional)",
-          "description": "z.ai API key for usage quota endpoint.",
-          "required": false
-        },
-        {
-          "name": "kimiK2ApiKey",
-          "type": "password",
-          "title": "Kimi K2 API Key (Optional)",
-          "description": "Kimi K2 API key for credit usage endpoint.",
-          "required": false
-        },
-        {
-          "name": "ampCookieHeader",
-          "type": "password",
-          "title": "Amp Cookie Header (Optional)",
-          "description": "Cookie header from an authenticated ampcode.com/settings request.",
-          "required": false
-        },
-        {
-          "name": "ampCookieSourceMode",
-          "type": "dropdown",
-          "title": "Amp Cookie Source",
-          "description": "Auto tries manual/cached/env/browser cookies; Manual uses only Amp Cookie Header.",
-          "default": "auto",
-          "data": [
-            {
-              "title": "Auto",
-              "value": "auto"
-            },
-            {
-              "title": "Manual",
-              "value": "manual"
-            }
-          ],
-          "required": false
-        },
-        {
-          "name": "minimaxApiKey",
-          "type": "password",
-          "title": "MiniMax API Key (Optional)",
-          "description": "MiniMax API key for coding plan remains endpoint.",
-          "required": false
-        },
-        {
-          "name": "minimaxCookieHeader",
-          "type": "password",
-          "title": "MiniMax Cookie Header (Optional)",
-          "description": "Cookie header or cURL from an authenticated platform.minimax.io session.",
-          "required": false
-        },
-        {
-          "name": "minimaxCookieSourceMode",
-          "type": "dropdown",
-          "title": "MiniMax Cookie Source",
-          "description": "Auto tries manual/cached/env/browser cookies when API key is unavailable.",
-          "default": "auto",
-          "data": [
-            {
-              "title": "Auto",
-              "value": "auto"
-            },
-            {
-              "title": "Manual",
-              "value": "manual"
-            }
-          ],
-          "required": false
-        },
-        {
-          "name": "opencodeCookieHeader",
-          "type": "password",
-          "title": "OpenCode Cookie Header (Optional)",
-          "description": "Cookie header from an authenticated opencode.ai session.",
-          "required": false
-        },
-        {
-          "name": "opencodeCookieSourceMode",
-          "type": "dropdown",
-          "title": "OpenCode Cookie Source",
-          "description": "Auto tries manual/cached/env/browser cookies; Manual uses only OpenCode Cookie Header.",
-          "default": "auto",
-          "data": [
-            {
-              "title": "Auto",
-              "value": "auto"
-            },
-            {
-              "title": "Manual",
-              "value": "manual"
-            }
-          ],
-          "required": false
-        },
-        {
-          "name": "codexUsageUrl",
-          "type": "textfield",
-          "title": "Codex Usage URL",
-          "description": "Usage page opened by the Codex action.",
-          "default": "https://chatgpt.com/codex/settings/usage",
-          "required": false
-        },
-        {
-          "name": "claudeUsageUrl",
-          "type": "textfield",
-          "title": "Claude Usage URL",
-          "description": "Usage page opened by the Claude action.",
-          "default": "https://claude.ai/settings/usage",
-          "required": false
-        },
-        {
-          "name": "geminiUsageUrl",
-          "type": "textfield",
-          "title": "Gemini Usage URL",
-          "description": "Usage page opened by the Gemini action.",
-          "default": "https://aistudio.google.com/app/plan",
-          "required": false
-        },
-        {
-          "name": "antigravityServerUrl",
-          "type": "textfield",
-          "title": "Antigravity Server URL (Optional)",
-          "description": "Local Antigravity language server base URL (for example http://127.0.0.1:8080).",
-          "required": false
-        },
-        {
-          "name": "antigravityUsageUrl",
-          "type": "textfield",
-          "title": "Antigravity Usage URL",
-          "description": "Usage page opened by the Antigravity action.",
-          "default": "https://antigravity.dev",
-          "required": false
-        },
-        {
-          "name": "copilotUsageUrl",
-          "type": "textfield",
-          "title": "Copilot Usage URL",
-          "description": "Usage page opened by the Copilot action.",
-          "default": "https://github.com/settings/copilot",
-          "required": false
-        },
-        {
-          "name": "cursorUsageUrl",
-          "type": "textfield",
-          "title": "Cursor Usage URL",
-          "description": "Usage page opened by the Cursor action.",
-          "default": "https://cursor.com/dashboard",
-          "required": false
-        },
-        {
-          "name": "openrouterApiBaseUrl",
-          "type": "textfield",
-          "title": "OpenRouter API Base URL (Optional)",
-          "description": "Default is https://openrouter.ai/api/v1.",
-          "required": false
-        },
-        {
-          "name": "zaiQuotaUrl",
-          "type": "textfield",
-          "title": "z.ai Quota URL (Optional)",
-          "description": "Default is https://api.z.ai/api/monitor/usage/quota/limit.",
-          "required": false
-        },
-        {
-          "name": "opencodeWorkspaceId",
-          "type": "textfield",
-          "title": "OpenCode Workspace ID (Optional)",
-          "description": "Optional wrk_... override for OpenCode usage fetch.",
-          "required": false
-        },
-        {
-          "name": "openrouterUsageUrl",
-          "type": "textfield",
-          "title": "OpenRouter Usage URL",
-          "description": "Usage page opened by the OpenRouter action.",
-          "default": "https://openrouter.ai/settings/credits",
-          "required": false
-        },
-        {
-          "name": "zaiUsageUrl",
-          "type": "textfield",
-          "title": "z.ai Usage URL",
-          "description": "Usage page opened by the z.ai action.",
-          "default": "https://z.ai/manage-apikey/subscription",
-          "required": false
-        },
-        {
-          "name": "kimiK2UsageUrl",
-          "type": "textfield",
-          "title": "Kimi K2 Usage URL",
-          "description": "Usage page opened by the Kimi K2 action.",
-          "default": "https://kimi-k2.ai",
-          "required": false
-        },
-        {
-          "name": "ampUsageUrl",
-          "type": "textfield",
-          "title": "Amp Usage URL",
-          "description": "Usage page opened by the Amp action.",
-          "default": "https://ampcode.com/settings",
-          "required": false
-        },
-        {
-          "name": "minimaxUsageUrl",
-          "type": "textfield",
-          "title": "MiniMax Usage URL",
-          "description": "Usage page opened by the MiniMax action.",
-          "default": "https://platform.minimax.io/user-center/payment/coding-plan",
-          "required": false
-        },
-        {
-          "name": "opencodeUsageUrl",
-          "type": "textfield",
-          "title": "OpenCode Usage URL",
-          "description": "Usage page opened by the OpenCode action.",
-          "default": "https://opencode.ai",
-          "required": false
-        }
-      ]
+      "mode": "view"
+    },
+    {
+      "name": "agent-usage-sampler",
+      "title": "Agent Usage Sampler",
+      "description": "Sample provider usage in the background for forecast accuracy.",
+      "mode": "no-view",
+      "interval": "15m"
     }
   ],
   "dependencies": {
@@ -354,5 +64,714 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "publish": "npx @raycast/api@latest publish"
-  }
+  },
+  "preferences": [
+    {
+      "name": "codexAuthToken",
+      "type": "password",
+      "title": "Codex Auth Token (Optional)",
+      "description": "Optional Bearer token override. Leave empty to auto-read ~/.codex/auth.json.",
+      "required": false
+    },
+    {
+      "name": "openaiAdminApiKey",
+      "type": "password",
+      "title": "OpenAI Admin API Key (Optional)",
+      "description": "Admin key for OpenAI organization spend and usage endpoints.",
+      "required": false
+    },
+    {
+      "name": "openaiApiKey",
+      "type": "password",
+      "title": "OpenAI API Key (Optional)",
+      "description": "Fallback OpenAI API key for legacy balance checks when Admin usage is unavailable.",
+      "required": false
+    },
+    {
+      "name": "claudeAccessToken",
+      "type": "password",
+      "title": "Claude OAuth Access Token (Optional)",
+      "description": "Optional OAuth token override. Leave empty to auto-read Claude credentials file.",
+      "required": false
+    },
+    {
+      "name": "claudeAdminApiKey",
+      "type": "password",
+      "title": "Claude Admin API Key (Optional)",
+      "description": "Admin key for Anthropic organization usage reports.",
+      "required": false
+    },
+    {
+      "name": "geminiAccessToken",
+      "type": "password",
+      "title": "Gemini OAuth Access Token (Optional)",
+      "description": "Optional OAuth token override. Leave empty to auto-read ~/.gemini/oauth_creds.json.",
+      "required": false
+    },
+    {
+      "name": "antigravityCsrfToken",
+      "type": "password",
+      "title": "Antigravity CSRF Token (Optional)",
+      "description": "CSRF token required by local Antigravity language server endpoints.",
+      "required": false
+    },
+    {
+      "name": "copilotApiToken",
+      "type": "password",
+      "title": "Copilot API Token (Optional)",
+      "description": "Optional manual token. You can also use device login from the command actions.",
+      "required": false
+    },
+    {
+      "name": "copilotEnterpriseUrl",
+      "type": "textfield",
+      "title": "Copilot Enterprise URL (Optional)",
+      "description": "GitHub Enterprise base URL for Copilot device flow and usage API (for example https://github.example.com).",
+      "required": false
+    },
+    {
+      "name": "cursorCookieHeader",
+      "type": "password",
+      "title": "Cursor Cookie Header (Optional)",
+      "description": "Optional cookie header for Cursor web API (from an active cursor.com session).",
+      "required": false
+    },
+    {
+      "name": "cursorCookieSourceMode",
+      "type": "dropdown",
+      "title": "Cursor Cookie Source",
+      "description": "Auto tries cached/environment/browser cookies; Manual uses only Cursor Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "checkProviderStatus",
+      "type": "checkbox",
+      "label": "Enable Provider Status Checks",
+      "description": "Show status highlights when providers report degraded/outage state.",
+      "default": false,
+      "required": false
+    },
+    {
+      "name": "openrouterApiKey",
+      "type": "password",
+      "title": "OpenRouter API Key (Optional)",
+      "description": "OpenRouter API key for credits and key quota endpoints.",
+      "required": false
+    },
+    {
+      "name": "zaiApiKey",
+      "type": "password",
+      "title": "z.ai API Key (Optional)",
+      "description": "z.ai API key for usage quota endpoint.",
+      "required": false
+    },
+    {
+      "name": "deepseekApiKey",
+      "type": "password",
+      "title": "DeepSeek API Key (Optional)",
+      "description": "DeepSeek API key for balance endpoint.",
+      "required": false
+    },
+    {
+      "name": "moonshotApiKey",
+      "type": "password",
+      "title": "Moonshot API Key (Optional)",
+      "description": "Moonshot/Kimi API key for account balance endpoint.",
+      "required": false
+    },
+    {
+      "name": "moonshotRegion",
+      "type": "dropdown",
+      "title": "Moonshot Region",
+      "description": "Moonshot/Kimi API region for balance checks.",
+      "default": "global",
+      "data": [
+        {
+          "title": "Global",
+          "value": "global"
+        },
+        {
+          "title": "China",
+          "value": "cn"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "mistralCookieHeader",
+      "type": "password",
+      "title": "Mistral Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated admin.mistral.ai billing session.",
+      "required": false
+    },
+    {
+      "name": "mistralCookieSourceMode",
+      "type": "dropdown",
+      "title": "Mistral Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies; Manual uses only Mistral Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "perplexityCookieHeader",
+      "type": "password",
+      "title": "Perplexity Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated perplexity.ai session.",
+      "required": false
+    },
+    {
+      "name": "perplexitySessionToken",
+      "type": "password",
+      "title": "Perplexity Session Token (Optional)",
+      "description": "Perplexity session token fallback when a full Cookie header is not provided.",
+      "required": false
+    },
+    {
+      "name": "perplexityCookieSourceMode",
+      "type": "dropdown",
+      "title": "Perplexity Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies; Manual uses only configured Perplexity auth.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "grokCookieHeader",
+      "type": "password",
+      "title": "Grok Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated grok.com session.",
+      "required": false
+    },
+    {
+      "name": "grokCookieSourceMode",
+      "type": "dropdown",
+      "title": "Grok Cookie Source",
+      "description": "Auto tries CLI/local/manual/cached/env/browser sources; Manual uses only configured Grok cookies.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "groqcloudApiKey",
+      "type": "password",
+      "title": "GroqCloud API Key (Optional)",
+      "description": "GroqCloud API key for usage metrics or API access validation.",
+      "required": false
+    },
+    {
+      "name": "windsurfCookieHeader",
+      "type": "password",
+      "title": "Windsurf Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated Windsurf/Codeium account session.",
+      "required": false
+    },
+    {
+      "name": "windsurfCookieSourceMode",
+      "type": "dropdown",
+      "title": "Windsurf Cookie Source",
+      "description": "Auto tries local cache/manual/cached/env/browser cookies; Manual uses only Windsurf Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "augmentApiKey",
+      "type": "password",
+      "title": "Augment API Key (Optional)",
+      "description": "Augment API key fallback when CLI or cookies are unavailable.",
+      "required": false
+    },
+    {
+      "name": "augmentCookieHeader",
+      "type": "password",
+      "title": "Augment Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated Augment account session.",
+      "required": false
+    },
+    {
+      "name": "augmentCookieSourceMode",
+      "type": "dropdown",
+      "title": "Augment Cookie Source",
+      "description": "Auto tries CLI/API/manual/cached/env/browser cookies; Manual uses only configured Augment cookies.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "kiroCliPath",
+      "type": "textfield",
+      "title": "Kiro CLI Path (Optional)",
+      "description": "Defaults to kiro-cli on PATH.",
+      "required": false
+    },
+    {
+      "name": "warpApiKey",
+      "type": "password",
+      "title": "Warp API Key (Optional)",
+      "description": "Warp API token for GraphQL usage checks.",
+      "required": false
+    },
+    {
+      "name": "zedCookieHeader",
+      "type": "password",
+      "title": "Zed Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated dashboard.zed.dev/account session.",
+      "required": false
+    },
+    {
+      "name": "zedCookieSourceMode",
+      "type": "dropdown",
+      "title": "Zed Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies; Manual uses only Zed Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "kimiK2ApiKey",
+      "type": "password",
+      "title": "Kimi K2 API Key (Optional)",
+      "description": "Kimi K2 API key for credit usage endpoint.",
+      "required": false
+    },
+    {
+      "name": "ampCookieHeader",
+      "type": "password",
+      "title": "Amp Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated ampcode.com/settings request.",
+      "required": false
+    },
+    {
+      "name": "ampCookieSourceMode",
+      "type": "dropdown",
+      "title": "Amp Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies; Manual uses only Amp Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "minimaxApiKey",
+      "type": "password",
+      "title": "MiniMax API Key (Optional)",
+      "description": "MiniMax API key for coding plan remains endpoint.",
+      "required": false
+    },
+    {
+      "name": "minimaxCookieHeader",
+      "type": "password",
+      "title": "MiniMax Cookie Header (Optional)",
+      "description": "Cookie header or cURL from an authenticated platform.minimax.io session.",
+      "required": false
+    },
+    {
+      "name": "minimaxCookieSourceMode",
+      "type": "dropdown",
+      "title": "MiniMax Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies when API key is unavailable.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "opencodeCookieHeader",
+      "type": "password",
+      "title": "OpenCode Cookie Header (Optional)",
+      "description": "Cookie header from an authenticated opencode.ai session.",
+      "required": false
+    },
+    {
+      "name": "opencodeCookieSourceMode",
+      "type": "dropdown",
+      "title": "OpenCode Cookie Source",
+      "description": "Auto tries manual/cached/env/browser cookies; Manual uses only OpenCode Cookie Header.",
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto",
+          "value": "auto"
+        },
+        {
+          "title": "Manual",
+          "value": "manual"
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "codexUsageUrl",
+      "type": "textfield",
+      "title": "Codex Usage URL",
+      "description": "Usage page opened by the Codex action.",
+      "default": "https://chatgpt.com/codex/settings/usage",
+      "required": false
+    },
+    {
+      "name": "claudeUsageUrl",
+      "type": "textfield",
+      "title": "Claude Usage URL",
+      "description": "Usage page opened by the Claude action.",
+      "default": "https://claude.ai/settings/usage",
+      "required": false
+    },
+    {
+      "name": "geminiUsageUrl",
+      "type": "textfield",
+      "title": "Gemini Usage URL",
+      "description": "Usage page opened by the Gemini action.",
+      "default": "https://aistudio.google.com/app/plan",
+      "required": false
+    },
+    {
+      "name": "antigravityServerUrl",
+      "type": "textfield",
+      "title": "Antigravity Server URL (Optional)",
+      "description": "Local Antigravity language server base URL (for example http://127.0.0.1:8080).",
+      "required": false
+    },
+    {
+      "name": "antigravityUsageUrl",
+      "type": "textfield",
+      "title": "Antigravity Usage URL",
+      "description": "Usage page opened by the Antigravity action.",
+      "default": "https://antigravity.dev",
+      "required": false
+    },
+    {
+      "name": "copilotUsageUrl",
+      "type": "textfield",
+      "title": "Copilot Usage URL",
+      "description": "Usage page opened by the Copilot action.",
+      "default": "https://github.com/settings/copilot",
+      "required": false
+    },
+    {
+      "name": "cursorUsageUrl",
+      "type": "textfield",
+      "title": "Cursor Usage URL",
+      "description": "Usage page opened by the Cursor action.",
+      "default": "https://cursor.com/dashboard",
+      "required": false
+    },
+    {
+      "name": "openrouterApiBaseUrl",
+      "type": "textfield",
+      "title": "OpenRouter API Base URL (Optional)",
+      "description": "Default is https://openrouter.ai/api/v1.",
+      "required": false
+    },
+    {
+      "name": "zaiQuotaUrl",
+      "type": "textfield",
+      "title": "z.ai Quota URL (Optional)",
+      "description": "Default is https://api.z.ai/api/monitor/usage/quota/limit.",
+      "required": false
+    },
+    {
+      "name": "claudeAdminUsageUrl",
+      "type": "textfield",
+      "title": "Claude Admin Usage URL (Optional)",
+      "description": "Override for Anthropic Admin usage-report endpoint.",
+      "required": false
+    },
+    {
+      "name": "moonshotBalanceUrl",
+      "type": "textfield",
+      "title": "Moonshot Balance URL (Optional)",
+      "description": "Override for Moonshot/Kimi API balance endpoint.",
+      "required": false
+    },
+    {
+      "name": "mistralUsageApiUrl",
+      "type": "textfield",
+      "title": "Mistral Usage API URL (Optional)",
+      "description": "Override for Mistral console billing JSON endpoint.",
+      "required": false
+    },
+    {
+      "name": "perplexityUsageApiUrl",
+      "type": "textfield",
+      "title": "Perplexity Usage API URL (Optional)",
+      "description": "Override for Perplexity credits/usage JSON endpoint.",
+      "required": false
+    },
+    {
+      "name": "grokUsageApiUrl",
+      "type": "textfield",
+      "title": "Grok Usage API URL (Optional)",
+      "description": "Override for Grok dashboard billing JSON endpoint.",
+      "required": false
+    },
+    {
+      "name": "groqcloudUsageApiUrl",
+      "type": "textfield",
+      "title": "GroqCloud Usage API URL (Optional)",
+      "description": "Optional enterprise usage/metrics endpoint; otherwise the key is validated with the models API.",
+      "required": false
+    },
+    {
+      "name": "windsurfUsageApiUrl",
+      "type": "textfield",
+      "title": "Windsurf Usage API URL (Optional)",
+      "description": "Override for Windsurf/Codeium usage JSON endpoint.",
+      "required": false
+    },
+    {
+      "name": "augmentUsageApiUrl",
+      "type": "textfield",
+      "title": "Augment Usage API URL (Optional)",
+      "description": "Override for Augment account usage JSON endpoint.",
+      "required": false
+    },
+    {
+      "name": "warpGraphqlUrl",
+      "type": "textfield",
+      "title": "Warp GraphQL URL (Optional)",
+      "description": "Default is https://app.warp.dev/graphql.",
+      "required": false
+    },
+    {
+      "name": "opencodeWorkspaceId",
+      "type": "textfield",
+      "title": "OpenCode Workspace ID (Optional)",
+      "description": "Optional wrk_... override for OpenCode usage fetch.",
+      "required": false
+    },
+    {
+      "name": "openrouterUsageUrl",
+      "type": "textfield",
+      "title": "OpenRouter Usage URL",
+      "description": "Usage page opened by the OpenRouter action.",
+      "default": "https://openrouter.ai/settings/credits",
+      "required": false
+    },
+    {
+      "name": "zaiUsageUrl",
+      "type": "textfield",
+      "title": "z.ai Usage URL",
+      "description": "Usage page opened by the z.ai action.",
+      "default": "https://z.ai/manage-apikey/subscription",
+      "required": false
+    },
+    {
+      "name": "openaiUsageUrl",
+      "type": "textfield",
+      "title": "OpenAI Usage URL",
+      "description": "Usage page opened by the OpenAI API action.",
+      "default": "https://platform.openai.com/usage",
+      "required": false
+    },
+    {
+      "name": "claudeAdminConsoleUrl",
+      "type": "textfield",
+      "title": "Claude Admin Console URL",
+      "description": "Usage page opened by the Claude Admin action.",
+      "default": "https://console.anthropic.com/settings/usage",
+      "required": false
+    },
+    {
+      "name": "deepseekUsageUrl",
+      "type": "textfield",
+      "title": "DeepSeek Usage URL",
+      "description": "Usage page opened by the DeepSeek action.",
+      "default": "https://platform.deepseek.com/usage",
+      "required": false
+    },
+    {
+      "name": "moonshotUsageUrl",
+      "type": "textfield",
+      "title": "Moonshot Usage URL",
+      "description": "Usage page opened by the Moonshot/Kimi API action.",
+      "default": "https://platform.moonshot.ai/console/account",
+      "required": false
+    },
+    {
+      "name": "mistralUsageUrl",
+      "type": "textfield",
+      "title": "Mistral Usage URL",
+      "description": "Usage page opened by the Mistral action.",
+      "default": "https://admin.mistral.ai/billing",
+      "required": false
+    },
+    {
+      "name": "perplexityUsageUrl",
+      "type": "textfield",
+      "title": "Perplexity Usage URL",
+      "description": "Usage page opened by the Perplexity action.",
+      "default": "https://www.perplexity.ai/settings/api",
+      "required": false
+    },
+    {
+      "name": "grokUsageUrl",
+      "type": "textfield",
+      "title": "Grok Usage URL",
+      "description": "Usage page opened by the Grok action.",
+      "default": "https://grok.com",
+      "required": false
+    },
+    {
+      "name": "groqcloudUsageUrl",
+      "type": "textfield",
+      "title": "GroqCloud Usage URL",
+      "description": "Usage page opened by the GroqCloud action.",
+      "default": "https://console.groq.com/settings/billing",
+      "required": false
+    },
+    {
+      "name": "windsurfUsageUrl",
+      "type": "textfield",
+      "title": "Windsurf Usage URL",
+      "description": "Usage page opened by the Windsurf action.",
+      "default": "https://windsurf.com/account",
+      "required": false
+    },
+    {
+      "name": "augmentUsageUrl",
+      "type": "textfield",
+      "title": "Augment Usage URL",
+      "description": "Usage page opened by the Augment action.",
+      "default": "https://app.augmentcode.com/account",
+      "required": false
+    },
+    {
+      "name": "kiroUsageUrl",
+      "type": "textfield",
+      "title": "Kiro Usage URL",
+      "description": "Usage page opened by the Kiro action.",
+      "default": "https://kiro.dev",
+      "required": false
+    },
+    {
+      "name": "warpUsageUrl",
+      "type": "textfield",
+      "title": "Warp Usage URL",
+      "description": "Usage page opened by the Warp action.",
+      "default": "https://app.warp.dev/account",
+      "required": false
+    },
+    {
+      "name": "zedUsageUrl",
+      "type": "textfield",
+      "title": "Zed Usage URL",
+      "description": "Usage page opened by the Zed action.",
+      "default": "https://dashboard.zed.dev/account",
+      "required": false
+    },
+    {
+      "name": "kimiK2UsageUrl",
+      "type": "textfield",
+      "title": "Kimi K2 Usage URL",
+      "description": "Usage page opened by the Kimi K2 action.",
+      "default": "https://kimi-k2.ai",
+      "required": false
+    },
+    {
+      "name": "ampUsageUrl",
+      "type": "textfield",
+      "title": "Amp Usage URL",
+      "description": "Usage page opened by the Amp action.",
+      "default": "https://ampcode.com/settings",
+      "required": false
+    },
+    {
+      "name": "minimaxUsageUrl",
+      "type": "textfield",
+      "title": "MiniMax Usage URL",
+      "description": "Usage page opened by the MiniMax action.",
+      "default": "https://platform.minimax.io/user-center/payment/coding-plan",
+      "required": false
+    },
+    {
+      "name": "opencodeUsageUrl",
+      "type": "textfield",
+      "title": "OpenCode Usage URL",
+      "description": "Usage page opened by the OpenCode action.",
+      "default": "https://opencode.ai",
+      "required": false
+    }
+  ]
 }

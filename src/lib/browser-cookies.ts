@@ -58,6 +58,11 @@ interface ChromiumBrowserConfig {
   localState?: string;
 }
 
+interface FirefoxBrowserConfig {
+  name: string;
+  profilesRoot: string;
+}
+
 function safeString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -307,7 +312,12 @@ def discover_chromium():
     appdata = os.environ.get("APPDATA", "")
     browsers = [
         {"name": "chrome", "root": os.path.join(localapp, "Google", "Chrome", "User Data"), "mode": "profiles"},
+        {"name": "chrome-beta", "root": os.path.join(localapp, "Google", "Chrome Beta", "User Data"), "mode": "profiles"},
+        {"name": "chrome-canary", "root": os.path.join(localapp, "Google", "Chrome SxS", "User Data"), "mode": "profiles"},
         {"name": "edge", "root": os.path.join(localapp, "Microsoft", "Edge", "User Data"), "mode": "profiles"},
+        {"name": "edge-beta", "root": os.path.join(localapp, "Microsoft", "Edge Beta", "User Data"), "mode": "profiles"},
+        {"name": "edge-dev", "root": os.path.join(localapp, "Microsoft", "Edge Dev", "User Data"), "mode": "profiles"},
+        {"name": "edge-canary", "root": os.path.join(localapp, "Microsoft", "Edge SxS", "User Data"), "mode": "profiles"},
         {"name": "brave", "root": os.path.join(localapp, "BraveSoftware", "Brave-Browser", "User Data"), "mode": "profiles"},
         {"name": "arc", "root": os.path.join(localapp, "Arc", "User Data"), "mode": "profiles"},
         {"name": "vivaldi", "root": os.path.join(localapp, "Vivaldi", "User Data"), "mode": "profiles"},
@@ -384,24 +394,33 @@ def discover_chromium():
 def discover_firefox():
     results = []
     appdata = os.environ.get("APPDATA", "")
-    profiles_root = os.path.join(appdata, "Mozilla", "Firefox", "Profiles")
-    if not os.path.isdir(profiles_root):
-        return results
     where_clause = build_where("host")
     query = "SELECT host, name, value FROM moz_cookies WHERE (" + where_clause + ")"
-    for profile in glob.glob(os.path.join(profiles_root, "*")):
-        cookie_db = os.path.join(profile, "cookies.sqlite")
-        if not os.path.exists(cookie_db):
+    browsers = [
+        {"name": "firefox", "profiles_root": os.path.join(appdata, "Mozilla", "Firefox", "Profiles")},
+        {"name": "zen", "profiles_root": os.path.join(appdata, "zen", "Profiles")},
+        {"name": "librewolf", "profiles_root": os.path.join(appdata, "LibreWolf", "Profiles")},
+        {"name": "waterfox", "profiles_root": os.path.join(appdata, "Waterfox", "Profiles")},
+        {"name": "floorp", "profiles_root": os.path.join(appdata, "Floorp", "Profiles")},
+    ]
+    for config in browsers:
+        browser = config.get("name") or "firefox"
+        profiles_root = config.get("profiles_root")
+        if not profiles_root or not os.path.isdir(profiles_root):
             continue
-        rows = query_sqlite(cookie_db, query, tuple(patterns))
-        for row in rows:
-            results.append({
-                "browser": "firefox",
-                "profile": profile,
-                "host": row["host"],
-                "name": row["name"],
-                "value": row["value"] or "",
-            })
+        for profile in glob.glob(os.path.join(profiles_root, "*")):
+            cookie_db = os.path.join(profile, "cookies.sqlite")
+            if not os.path.exists(cookie_db):
+                continue
+            rows = query_sqlite(cookie_db, query, tuple(patterns))
+            for row in rows:
+                results.append({
+                    "browser": browser,
+                    "profile": profile,
+                    "host": row["host"],
+                    "name": row["name"],
+                    "value": row["value"] or "",
+                })
     return results
 
 chromium_rows, chromium_v20_count = discover_chromium()
@@ -456,6 +475,17 @@ function chromiumBrowserConfigsFromEnv(): ChromiumBrowserConfig[] {
   }
 
   return configs;
+}
+
+function firefoxBrowserConfigsFromEnv(): FirefoxBrowserConfig[] {
+  const appData = safeString(process.env.APPDATA) ?? "";
+  return [
+    { name: "firefox", profilesRoot: path.join(appData, "Mozilla", "Firefox", "Profiles") },
+    { name: "zen", profilesRoot: path.join(appData, "zen", "Profiles") },
+    { name: "librewolf", profilesRoot: path.join(appData, "LibreWolf", "Profiles") },
+    { name: "waterfox", profilesRoot: path.join(appData, "Waterfox", "Profiles") },
+    { name: "floorp", profilesRoot: path.join(appData, "Floorp", "Profiles") },
+  ];
 }
 
 async function resolveChromiumProfiles(root: string, mode: "profiles" | "single"): Promise<string[]> {
@@ -595,17 +625,19 @@ async function discoverBrowserCookiesWithNodeSqlite(domains: string[]): Promise<
 
   const appData = safeString(process.env.APPDATA);
   if (appData) {
-    const firefoxProfiles = path.join(appData, "Mozilla", "Firefox", "Profiles");
-    if (await pathExists(firefoxProfiles)) {
-      const firefoxWhere = patterns.map(() => "host LIKE ?").join(" OR ");
-      const firefoxSql = `SELECT host, name, value FROM moz_cookies WHERE (${firefoxWhere})`;
+    const firefoxWhere = patterns.map(() => "host LIKE ?").join(" OR ");
+    const firefoxSql = `SELECT host, name, value FROM moz_cookies WHERE (${firefoxWhere})`;
+    for (const config of firefoxBrowserConfigsFromEnv()) {
+      if (!(await pathExists(config.profilesRoot))) {
+        continue;
+      }
       try {
-        const entries = await fs.readdir(firefoxProfiles, { withFileTypes: true });
+        const entries = await fs.readdir(config.profilesRoot, { withFileTypes: true });
         for (const entry of entries) {
           if (!entry.isDirectory()) {
             continue;
           }
-          const profile = path.join(firefoxProfiles, entry.name);
+          const profile = path.join(config.profilesRoot, entry.name);
           const cookieDb = path.join(profile, "cookies.sqlite");
           if (!(await pathExists(cookieDb))) {
             continue;
@@ -613,7 +645,7 @@ async function discoverBrowserCookiesWithNodeSqlite(domains: string[]): Promise<
           const rows = await querySqliteWithNode(cookieDb, firefoxSql, patterns);
           for (const row of rows) {
             firefox.push({
-              browser: "firefox",
+              browser: config.name,
               profile,
               host: safeString(row.host) ?? "",
               name: safeString(row.name) ?? "",

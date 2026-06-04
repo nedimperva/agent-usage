@@ -210,6 +210,10 @@ function buildWindowQuota(
   const resetAt = resetSeconds !== undefined ? new Date(resetSeconds * 1000).toISOString() : undefined;
   const windowSeconds = parseOptionalNumber(window.limit_window_seconds);
   const windowSpan = formatWindowSpan(windowSeconds);
+  const windowStartAt =
+    resetSeconds !== undefined && windowSeconds !== undefined && windowSeconds > 0
+      ? new Date((resetSeconds - windowSeconds) * 1000).toISOString()
+      : undefined;
 
   let label = fallbackLabel;
   if (windowSeconds !== undefined) {
@@ -228,6 +232,8 @@ function buildWindowQuota(
       windowSpan ? `, ${windowSpan}` : ""
     })`,
     resetAt,
+    windowStartAt,
+    windowDurationSeconds: windowSeconds,
     trendBadge: `${formatPercent(normalizedUsedPercent)} used`,
     status: statusFromRemainingPercent(remainingPercent),
   };

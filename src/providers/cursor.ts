@@ -1205,6 +1205,7 @@ function buildMoneyQuota(
   label: string,
   usage: CursorMoneyUsage | undefined,
   resetAt?: string,
+  windowStartAt?: string,
 ): QuotaItem | undefined {
   if (!usage) {
     return undefined;
@@ -1240,6 +1241,11 @@ function buildMoneyQuota(
     remainingPercent,
     remainingDisplay,
     resetAt,
+    windowStartAt,
+    windowDurationSeconds:
+      resetAt && windowStartAt
+        ? Math.max(0, Math.round((Date.parse(resetAt) - Date.parse(windowStartAt)) / 1000))
+        : undefined,
     status: statusFromRemainingPercent(remainingPercent),
   };
 }
@@ -1249,6 +1255,7 @@ export function mapCursorUsageToQuotas(
   legacyUsage?: CursorLegacyUsageResponse,
 ): QuotaItem[] {
   const quotas: QuotaItem[] = [];
+  const windowStartAt = parseDateLike(summary.billingCycleStart ?? summary.billing_cycle_start);
   const resetAt = parseDateLike(summary.billingCycleEnd ?? summary.billing_cycle_end);
   const individualPlan = summary.individualUsage?.plan ?? summary.individual_usage?.plan;
   const individualOnDemand =
@@ -1256,9 +1263,15 @@ export function mapCursorUsageToQuotas(
   const teamOnDemandUsage =
     summary.teamUsage?.onDemand ?? summary.teamUsage?.on_demand ?? summary.team_usage?.on_demand;
 
-  const included = buildMoneyQuota("cursor-plan", "Included", individualPlan, resetAt);
-  const onDemand = buildMoneyQuota("cursor-on-demand", "Extra", individualOnDemand, resetAt);
-  const teamOnDemand = buildMoneyQuota("cursor-team-on-demand", "Team Extra", teamOnDemandUsage, resetAt);
+  const included = buildMoneyQuota("cursor-plan", "Included", individualPlan, resetAt, windowStartAt);
+  const onDemand = buildMoneyQuota("cursor-on-demand", "Extra", individualOnDemand, resetAt, windowStartAt);
+  const teamOnDemand = buildMoneyQuota(
+    "cursor-team-on-demand",
+    "Team Extra",
+    teamOnDemandUsage,
+    resetAt,
+    windowStartAt,
+  );
 
   if (included) {
     quotas.push(included);
@@ -1283,6 +1296,11 @@ export function mapCursorUsageToQuotas(
       remainingPercent,
       remainingDisplay: `${remaining.toFixed(0)} left of ${maxRequests.toFixed(0)}`,
       resetAt,
+      windowStartAt,
+      windowDurationSeconds:
+        resetAt && windowStartAt
+          ? Math.max(0, Math.round((Date.parse(resetAt) - Date.parse(windowStartAt)) / 1000))
+          : undefined,
       status: statusFromRemainingPercent(remainingPercent),
     });
   }

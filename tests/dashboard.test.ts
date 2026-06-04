@@ -128,6 +128,34 @@ describe("summarizeProviderSnapshot", () => {
     expect(proIndex).toBeLessThan(tierIndex);
     expect(summary.subtitle).not.toContain("Project:");
   });
+
+  it("includes a compact forecast hint when available", () => {
+    const summary = summarizeProviderSnapshot(
+      snapshot("codex", {
+        quotas: [
+          {
+            id: "weekly",
+            label: "Weekly Limit",
+            remainingPercent: 71,
+            remainingDisplay: "71% left",
+            resetAt: "2026-02-26T00:00:00Z",
+            status: "ok",
+            forecast: {
+              paceStatus: "deficit",
+              deficitPercent: 10,
+              estimatedRunoutAt: "2026-02-25T19:00:00Z",
+              confidence: "low",
+              sampleCount: 3,
+            },
+          },
+        ],
+      }),
+      new Date("2026-02-23T12:00:00Z"),
+    );
+
+    expect(summary.subtitle).toContain("Weekly Limit | 10% deficit");
+    expect(summary.subtitle).toContain("Low confidence");
+  });
 });
 
 describe("refresh orchestration", () => {
@@ -193,10 +221,50 @@ describe("refresh orchestration", () => {
     );
 
     expect(result.failedProviders).toEqual(["copilot"]);
+    expect(result.failureMessages.copilot).toBe("bad token");
     expect(result.snapshots.codex?.quotas[0].id).toBe("codex-ok");
     expect(result.snapshots.claude?.quotas[0].id).toBe("claude-ok");
     expect(result.snapshots.copilot?.source).toBe("manual");
     expect(result.snapshots.copilot?.quotas[0].remainingDisplay).toBe("bad token");
     expect(result.refreshedAt).toBe("2026-02-23T14:30:00.000Z");
+  });
+
+  it("does not report failure messages for successful refreshes", async () => {
+    const result = await refreshAllProviders(
+      {},
+      async (provider) =>
+        snapshot(provider, {
+          quotas: [{ id: `${provider}-ok`, label: "OK", remainingDisplay: "ok", status: "ok" }],
+        }),
+      () => {
+        throw new Error("fallback should not be used");
+      },
+      new Date("2026-02-23T14:30:00Z"),
+    );
+
+    expect(result.failedProviders).toEqual([]);
+    expect(result.failureMessages).toEqual({});
+  });
+
+  it("refreshAllProviders only refreshes the requested provider order", async () => {
+    const seen: string[] = [];
+
+    const result = await refreshAllProviders(
+      {},
+      async (provider) => {
+        seen.push(provider);
+        return snapshot(provider, {
+          quotas: [{ id: `${provider}-ok`, label: "OK", remainingDisplay: "ok", status: "ok" }],
+        });
+      },
+      () => {
+        throw new Error("fallback should not be used");
+      },
+      new Date("2026-02-23T14:30:00Z"),
+      ["codex", "claude"],
+    );
+
+    expect(seen).toEqual(["codex", "claude"]);
+    expect(Object.keys(result.snapshots)).toEqual(["codex", "claude"]);
   });
 });

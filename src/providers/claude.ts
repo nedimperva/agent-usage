@@ -203,6 +203,7 @@ function toQuotaFromWindow(
   window: ClaudeOAuthUsageWindow | undefined,
   label: string,
   id: string,
+  windowDurationSeconds?: number,
 ): QuotaItem | undefined {
   const rawUtilization = parseOptionalNumber(window?.utilization);
   if (rawUtilization === undefined) {
@@ -213,6 +214,11 @@ function toQuotaFromWindow(
   const normalizedUsedPercent = Math.max(0, Math.min(100, usedPercent));
   const remainingPercent = Math.max(0, Math.min(100, 100 - normalizedUsedPercent));
   const resetAt = parseDateLike(window?.resets_at);
+  const resetAtMs = resetAt ? Date.parse(resetAt) : NaN;
+  const windowStartAt =
+    resetAt && windowDurationSeconds !== undefined && windowDurationSeconds > 0 && !Number.isNaN(resetAtMs)
+      ? new Date(resetAtMs - windowDurationSeconds * 1000).toISOString()
+      : undefined;
   return {
     id,
     label,
@@ -221,6 +227,8 @@ function toQuotaFromWindow(
       .toFixed(1)
       .replace(/\.0$/, "")}% used)`,
     resetAt,
+    windowStartAt,
+    windowDurationSeconds,
     trendBadge: `${normalizedUsedPercent.toFixed(1).replace(/\.0$/, "")}% used`,
     status: statusFromRemainingPercent(remainingPercent),
   };
@@ -228,11 +236,16 @@ function toQuotaFromWindow(
 
 export function mapClaudeUsageToQuotas(payload: ClaudeOAuthUsageResponse): QuotaItem[] {
   const quotas: QuotaItem[] = [];
-  const primary = toQuotaFromWindow(payload.five_hour, "5 Hour Limit", "claude-five-hour");
-  const weekly = toQuotaFromWindow(payload.seven_day, "Weekly Limit", "claude-weekly");
-  const oauthApps = toQuotaFromWindow(payload.seven_day_oauth_apps, "OAuth Apps Weekly", "claude-oauth-apps-weekly");
-  const sonnet = toQuotaFromWindow(payload.seven_day_sonnet, "Sonnet Weekly", "claude-sonnet-weekly");
-  const opus = toQuotaFromWindow(payload.seven_day_opus, "Opus Weekly", "claude-opus-weekly");
+  const primary = toQuotaFromWindow(payload.five_hour, "5 Hour Limit", "claude-five-hour", 5 * 60 * 60);
+  const weekly = toQuotaFromWindow(payload.seven_day, "Weekly Limit", "claude-weekly", 7 * 24 * 60 * 60);
+  const oauthApps = toQuotaFromWindow(
+    payload.seven_day_oauth_apps,
+    "OAuth Apps Weekly",
+    "claude-oauth-apps-weekly",
+    7 * 24 * 60 * 60,
+  );
+  const sonnet = toQuotaFromWindow(payload.seven_day_sonnet, "Sonnet Weekly", "claude-sonnet-weekly", 7 * 24 * 60 * 60);
+  const opus = toQuotaFromWindow(payload.seven_day_opus, "Opus Weekly", "claude-opus-weekly", 7 * 24 * 60 * 60);
   const iguana = toQuotaFromWindow(payload.iguana_necktie, "Iguana Necktie", "claude-iguana-necktie");
 
   if (primary) {

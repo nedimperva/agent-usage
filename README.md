@@ -1,13 +1,13 @@
 # Agent Usage (Raycast)
 
-Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional API/cookie providers in one Raycast command.
+Track Codex, OpenAI API, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, Zed, and optional API/cookie/CLI providers in one Raycast command.
 
 ## Features
 
 - Unified dashboard with one-row provider summaries for Codex, Claude, Cursor, Gemini, Antigravity, and Copilot.
-- Optional providers (`OpenRouter`, `z.ai`, `Kimi K2`, `Amp`, `MiniMax`, `OpenCode`) are hidden by default and only shown when enabled or configured.
+- Optional providers (`OpenAI API`, `Claude Admin`, `OpenRouter`, `z.ai`, `DeepSeek`, `Moonshot/Kimi API`, `Mistral`, `Perplexity`, `Grok`, `GroqCloud`, `Windsurf`, `Augment`, `Kiro`, `Warp`, `Zed`, `Kimi K2`, `Amp`, `MiniMax`, `OpenCode`, `OpenCode Go`) are hidden by default and only shown when enabled or configured.
 - Cursor supports `Auto` cookie source mode with cached reuse and best-effort browser import.
-- Amp/OpenCode/MiniMax support cookie `Auto` source mode with cached/env/browser fallback.
+- Amp/OpenCode/MiniMax/Mistral/Perplexity/Grok/Windsurf/Augment support cookie `Auto` source mode with cached/env/browser fallback.
 - Provider drilldown views with quota details, inline issues, provider-scoped actions, and richer provider metadata.
 - Progress rings based on real remaining percentage.
 - Copilot device login flow inside the command.
@@ -30,13 +30,28 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
 - Antigravity: local language-server endpoints (for example `/exa.language_server_pb.LanguageServerService/GetUserStatus`) using your local server URL and CSRF token.
   - Includes model quota tracking for Claude, Gemini Pro, and Gemini Flash when present.
 - Copilot: GitHub Copilot endpoint (`https://api.github.com/copilot_internal/user`) with device flow or token auth.
+  - Optional GitHub Enterprise base URL supports Enterprise device-flow and usage API paths.
   - If reset timestamps are missing in the response, Copilot resets default to the next first-of-month boundary.
+- OpenAI API: organization costs + completions usage endpoints with Admin API key auth, plus legacy credit-balance fallback when available.
+- Claude Admin: Anthropic organization usage report endpoint with Admin API key auth.
 - OpenRouter: credits + key quota endpoints (`/api/v1/credits`, `/api/v1/key`) with API key auth.
 - z.ai: quota endpoint (`https://api.z.ai/api/monitor/usage/quota/limit`) with API key auth.
+- DeepSeek: balance endpoint (`https://api.deepseek.com/user/balance`) with API key auth.
+- Moonshot/Kimi API: balance endpoint (`/v1/users/me/balance`) with API key auth.
+- Mistral: console billing endpoints with cookie-session auth.
+- Perplexity: account credits endpoints with cookie/session-token auth.
+- Grok: Grok CLI billing, dashboard cookie endpoints, or local session signal fallback.
+- GroqCloud: API key validation and optional configured usage/metrics endpoint.
+- Windsurf: local usage cache when present, otherwise Windsurf/Codeium account cookies.
+- Augment: `auggie` CLI first, then API key or browser-cookie account endpoints.
+- Kiro: `kiro-cli chat --no-interactive /usage` output.
+- Warp: GraphQL usage endpoint with API token auth.
+- Zed: account page (`https://dashboard.zed.dev/account`) with cookie-session auth.
 - Kimi K2: credit endpoint (`https://kimi-k2.ai/api/user/credits`) with API key auth.
 - Amp: settings page (`https://ampcode.com/settings`) with cookie header auth.
-- MiniMax: coding plan endpoints (`/v1/api/openplatform/coding_plan/remains`, `/v1/coding_plan/remains`) with API key auth, plus cookie-session fallback.
+- MiniMax: coding plan endpoints (`/v1/api/openplatform/coding_plan/remains`, `/v1/coding_plan/remains`) with API key auth, plus cookie-session fallback and multi-lane quota parsing when exposed.
 - OpenCode: server function endpoint (`https://opencode.ai/_server`) with cookie-session auth.
+- OpenCode Go: OpenCode workspace usage mode for rolling, weekly, and optional monthly windows.
 
 ## Requirements
 
@@ -64,6 +79,7 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
 3. Copilot
    - Recommended: `Start Copilot Device Login` then `Complete Copilot Device Login`
    - Optional: set `Copilot API Token` in extension preferences
+   - Optional Enterprise: set `Copilot Enterprise URL`
 4. Cursor
    - Set `Cursor Cookie Source` to `Auto` (recommended) or `Manual`.
    - In `Auto`, the extension tries manual header, cached cookie, browser import (Chrome/Edge/Brave + Cursor desktop profile), env var, and Cursor desktop auth token fallback.
@@ -85,19 +101,47 @@ Track Codex, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, and optional A
    - Optional client headers via env: `OPENROUTER_HTTP_REFERER`, `OPENROUTER_X_TITLE`
 8. z.ai
    - Set `z.ai API Key` in extension preferences (or `Z_AI_API_KEY` env var)
-9. Kimi K2
-   - Set `Kimi K2 API Key` in extension preferences (or `KIMI_K2_API_KEY` / `KIMI_API_KEY` env var)
-10. Amp
-   - Set `Amp Cookie Source` to `Auto` (recommended) or `Manual`
-   - In `Auto`, extension tries manual header, cached cookie, env var, and browser import
-   - In `Manual`, set `Amp Cookie Header` from an authenticated `ampcode.com/settings` request
-11. MiniMax
-   - Preferred: set `MiniMax API Key` in extension preferences (or `MINIMAX_API_KEY` env var)
-   - Optional: set `MiniMax Cookie Source` to `Auto`/`Manual` and provide `MiniMax Cookie Header` for web-session fallback
-12. OpenCode
-   - Set `OpenCode Cookie Source` to `Auto` (recommended) or `Manual`
-   - In `Auto`, extension tries manual header, cached cookie, env var, and browser import
-   - In `Manual`, set `OpenCode Cookie Header` from an authenticated `opencode.ai` session
+9. OpenAI API / Claude Admin / API-balance providers
+   - Set the relevant API key in preferences or env:
+     - `OPENAI_ADMIN_KEY` / `OPENAI_API_KEY`
+     - `ANTHROPIC_ADMIN_KEY`
+     - `DEEPSEEK_API_KEY`
+     - `MOONSHOT_API_KEY`
+     - `GROQ_API_KEY`
+     - `WARP_API_KEY`
+10. Cookie/CLI optional providers
+
+- Mistral, Perplexity, Grok, Windsurf, and Augment can use manual cookies or `Auto` browser import where supported.
+- Augment prefers `auggie usage --json` when available.
+- Kiro uses `kiro-cli chat --no-interactive /usage`.
+
+11. Zed
+
+- Set `Zed Cookie Source` to `Auto` (recommended) or `Manual`
+- In `Auto`, extension tries manual header, cached cookie, env var, and browser import for `dashboard.zed.dev` / `zed.dev`
+- In `Manual`, set `Zed Cookie Header` from an authenticated `dashboard.zed.dev/account` request
+
+12. Kimi K2
+
+- Set `Kimi K2 API Key` in extension preferences (or `KIMI_K2_API_KEY` / `KIMI_API_KEY` env var)
+
+13. Amp
+
+- Set `Amp Cookie Source` to `Auto` (recommended) or `Manual`
+- In `Auto`, extension tries manual header, cached cookie, env var, and browser import
+- In `Manual`, set `Amp Cookie Header` from an authenticated `ampcode.com/settings` request
+
+14. MiniMax
+
+- Preferred: set `MiniMax API Key` in extension preferences (or `MINIMAX_API_KEY` env var)
+- Optional: set `MiniMax Cookie Source` to `Auto`/`Manual` and provide `MiniMax Cookie Header` for web-session fallback
+
+15. OpenCode / OpenCode Go
+
+- Set `OpenCode Cookie Source` to `Auto` (recommended) or `Manual`
+- In `Auto`, extension tries manual header, cached cookie, env var, and browser import
+- In `Manual`, set `OpenCode Cookie Header` from an authenticated `opencode.ai` session
+- Optional: set `OpenCode Workspace ID` for workspace-specific OpenCode Go usage.
 
 ## Optional provider visibility
 
@@ -132,9 +176,10 @@ Raycast stores captured screenshots and store metadata in a top-level `metadata/
    - If error mentions locked Cursor cookie databases, fully quit Cursor once and refresh so Auto can import a session.
 4. If Gemini is unavailable, run `gemini` to refresh OAuth credentials, then refresh.
 5. If Antigravity is unavailable, keep Antigravity running for auto-detect, or set server URL + CSRF token in preferences, then refresh.
-6. If Copilot is unavailable, use device login again or set a fresh token.
-7. If optional providers are missing from dashboard, open `Manage Optional Providers` and enable them.
-8. For Amp/OpenCode/MiniMax cookie mode on Chrome, app-bound (`v20`) cookies may require manual Cookie header paste.
+6. If Zed is unavailable, switch Zed Cookie Source to `Auto` or update `Zed Cookie Header` manually.
+7. If Copilot is unavailable, use device login again or set a fresh token.
+8. If optional providers are missing from dashboard, open `Manage Optional Providers` and enable them.
+9. For cookie mode on Chrome, app-bound (`v20`) cookies may require manual Cookie header paste.
 
 ## Known limitations
 

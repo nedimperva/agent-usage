@@ -22,12 +22,42 @@ function makeSnapshot(remainingPercent: number, fetchedAt: string): ProviderUsag
 describe("history", () => {
   it("merges quota history points over time", () => {
     const previous = makeSnapshot(80, "2026-02-23T00:00:00Z");
-    previous.quotaHistory = [{ quotaId: "weekly", points: [{ at: "2026-02-23T00:00:00Z", remainingPercent: 80 }] }];
+    previous.quotas[0].resetAt = "2026-02-24T00:00:00Z";
+    previous.quotaHistory = [
+      {
+        quotaId: "weekly",
+        points: [
+          {
+            at: "2026-02-23T00:00:00Z",
+            remainingPercent: 80,
+            resetAt: "2026-02-24T00:00:00Z",
+            sampleSource: "manual",
+          },
+        ],
+      },
+    ];
 
-    const merged = mergeQuotaHistory(previous, makeSnapshot(70, "2026-02-24T00:00:00Z"), "2026-02-24T00:00:00Z");
+    const next = makeSnapshot(70, "2026-02-24T00:00:00Z");
+    next.quotas[0].resetAt = "2026-02-25T00:00:00Z";
+    const merged = mergeQuotaHistory(previous, next, "2026-02-24T00:00:00Z", "background");
     expect(merged).toHaveLength(1);
-    expect(merged[0].points).toHaveLength(2);
-    expect(merged[0].points[1].remainingPercent).toBe(70);
+    expect(merged[0].points).toHaveLength(1);
+    expect(merged[0].points[0].remainingPercent).toBe(70);
+    expect(merged[0].points[0].sampleSource).toBe("background");
+  });
+
+  it("resets the active cycle when remaining jumps upward sharply", () => {
+    const previous = makeSnapshot(20, "2026-02-23T00:00:00Z");
+    previous.quotaHistory = [
+      {
+        quotaId: "weekly",
+        points: [{ at: "2026-02-23T00:00:00Z", remainingPercent: 20, sampleSource: "manual" }],
+      },
+    ];
+
+    const merged = mergeQuotaHistory(previous, makeSnapshot(85, "2026-02-23T06:00:00Z"), "2026-02-23T06:00:00Z");
+    expect(merged[0].points).toHaveLength(1);
+    expect(merged[0].points[0].remainingPercent).toBe(85);
   });
 
   it("summarizes sparkline and deltas", () => {

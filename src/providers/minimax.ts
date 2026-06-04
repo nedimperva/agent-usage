@@ -30,6 +30,14 @@ interface MiniMaxCookieCandidate {
 }
 
 interface MiniMaxModelRemains {
+  model?: unknown;
+  model_name?: unknown;
+  modelName?: unknown;
+  service?: unknown;
+  service_name?: unknown;
+  serviceName?: unknown;
+  type?: unknown;
+  name?: unknown;
   current_interval_total_count?: unknown;
   currentIntervalTotalCount?: unknown;
   total_count?: unknown;
@@ -384,17 +392,26 @@ async function requestMiniMaxPayload(
   return { payload, endpoint: url.toString() };
 }
 
-function mapPayloadToSnapshot(
-  payload: MiniMaxPayload,
-  endpoint: string,
-  sourceLabel: string,
-  fetchedAt: string,
-): ProviderUsageSnapshot {
-  const remains = resolveModelRemains(payload);
-  if (!remains) {
-    throw new Error("MiniMax response did not include coding plan limits.");
+function modelRemainsLabel(remains: MiniMaxModelRemains, index: number): string {
+  const candidates = [
+    remains.model,
+    remains.model_name,
+    remains.modelName,
+    remains.service,
+    remains.service_name,
+    remains.serviceName,
+    remains.type,
+    remains.name,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
   }
+  return index === 0 ? "Plan Usage" : `Plan Usage ${index + 1}`;
+}
 
+function mapModelRemainsToQuota(remains: MiniMaxModelRemains, index: number) {
   const total =
     parseNumber(
       remains.current_interval_total_count ??
@@ -451,24 +468,44 @@ function mapPayloadToSnapshot(
     start && end && end.getTime() > start.getTime() ? Math.round((end.getTime() - start.getTime()) / 60000) : undefined;
 
   return {
+    quota: {
+      id: `minimax-plan-${index}`,
+      label: modelRemainsLabel(remains, index),
+      remainingPercent,
+      remainingDisplay:
+        total !== undefined && remaining !== undefined
+          ? `${Math.max(0, remaining).toFixed(0)} left of ${Math.max(0, total).toFixed(0)}`
+          : total !== undefined && usedCount !== undefined
+            ? `${Math.max(0, usedCount).toFixed(0)} used of ${Math.max(0, total).toFixed(0)}`
+            : "Usage data available",
+      resetAt: resetsAt,
+      status: statusFromRemainingPercent(remainingPercent),
+    },
+    windowMinutes,
+  };
+}
+
+function mapPayloadToSnapshot(
+  payload: MiniMaxPayload,
+  endpoint: string,
+  sourceLabel: string,
+  fetchedAt: string,
+): ProviderUsageSnapshot {
+  const remainsList = findModelRemainsList(payload);
+  const fallbackRemains = resolveModelRemains(payload);
+  const remainsEntries = remainsList && remainsList.length > 0 ? remainsList : fallbackRemains ? [fallbackRemains] : [];
+  if (remainsEntries.length === 0) {
+    throw new Error("MiniMax response did not include coding plan limits.");
+  }
+
+  const mapped = remainsEntries.map((remains, index) => mapModelRemainsToQuota(remains, index));
+  const firstWindowMinutes = mapped.find((entry) => entry.windowMinutes !== undefined)?.windowMinutes;
+
+  return {
     provider: "minimax",
     planLabel: resolvePlanName(payload) ?? "API",
     fetchedAt,
-    quotas: [
-      {
-        id: "minimax-plan",
-        label: "Plan Usage",
-        remainingPercent,
-        remainingDisplay:
-          total !== undefined && remaining !== undefined
-            ? `${Math.max(0, remaining).toFixed(0)} left of ${Math.max(0, total).toFixed(0)}`
-            : total !== undefined && usedCount !== undefined
-              ? `${Math.max(0, usedCount).toFixed(0)} used of ${Math.max(0, total).toFixed(0)}`
-              : "Usage data available",
-        resetAt: resetsAt,
-        status: statusFromRemainingPercent(remainingPercent),
-      },
-    ],
+    quotas: mapped.map((entry) => entry.quota),
     source: "api",
     metadataSections: [
       {
@@ -477,7 +514,8 @@ function mapPayloadToSnapshot(
         items: [
           { label: "Source", value: sourceLabel },
           { label: "Endpoint", value: endpoint },
-          { label: "Window", value: windowMinutes !== undefined ? `${windowMinutes} minutes` : "unknown" },
+          { label: "Quota lanes", value: `${mapped.length}` },
+          { label: "Window", value: firstWindowMinutes !== undefined ? `${firstWindowMinutes} minutes` : "unknown" },
         ],
       },
     ],

@@ -24,5 +24,6 @@ describe("mapClaudeUsageToQuotas", () => {
     expect(quotas.some((quota) => quota.id === "claude-opus-weekly")).toBe(true);
     expect(quotas.some((quota) => quota.id === "claude-extra-usage")).toBe(true);
     expect(quotas.find((quota) => quota.id === "claude-extra-usage")?.remainingDisplay).toContain("USD");
+    expect(quotas.find((quota) => quota.id === "claude-five-hour")?.windowDurationSeconds).toBe(5 * 60 * 60);
   });
 });

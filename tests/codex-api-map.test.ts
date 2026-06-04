@@ -26,6 +26,7 @@ describe("mapCodexUsageToQuotas", () => {
     expect(quotas.some((quota) => quota.label === "Weekly Limit")).toBe(true);
     expect(quotas.some((quota) => quota.id === "codex-credits")).toBe(true);
     expect(quotas.find((quota) => quota.id === "codex-primary-limit")?.remainingDisplay).toContain("used");
+    expect(quotas.find((quota) => quota.id === "codex-primary-limit")?.windowDurationSeconds).toBe(5 * 60 * 60);
   });
 
   it("maps unlimited credits when present", () => {

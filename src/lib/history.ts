@@ -1,7 +1,8 @@
-import { QuotaHistorySeries, ProviderUsageSnapshot } from "../models/usage";
+import { QuotaHistorySeries, ProviderUsageSnapshot, QuotaSampleSource } from "../models/usage";
 
 const MAX_POINTS_PER_QUOTA = 120;
 const SPARK_CHARS = "._-:=+*#%@";
+const ROLLOVER_PERCENT_JUMP = 20;
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
@@ -11,6 +12,7 @@ export function mergeQuotaHistory(
   previous: ProviderUsageSnapshot | undefined,
   next: ProviderUsageSnapshot,
   observedAt: string,
+  sampleSource: QuotaSampleSource = "manual",
 ): QuotaHistorySeries[] {
   const existing = new Map<string, QuotaHistorySeries>();
   for (const series of previous?.quotaHistory ?? []) {
@@ -28,10 +30,39 @@ export function mergeQuotaHistory(
     const normalized = clampPercent(quota.remainingPercent);
     const series = existing.get(quota.id) ?? { quotaId: quota.id, points: [] };
     const last = series.points[series.points.length - 1];
-    if (!last || Math.abs(last.remainingPercent - normalized) > 0.01) {
-      series.points.push({ at: observedAt, remainingPercent: normalized });
+    const lastResetAt = last?.resetAt;
+    const currentResetAt = quota.resetAt;
+    const observedAtMs = Date.parse(observedAt);
+    const lastAtMs = last ? Date.parse(last.at) : NaN;
+    const lastResetAtMs = lastResetAt ? Date.parse(lastResetAt) : NaN;
+    const resetChanged = !!lastResetAt && !!currentResetAt && lastResetAt !== currentResetAt;
+    const resetPassed =
+      !Number.isNaN(lastResetAtMs) &&
+      !Number.isNaN(observedAtMs) &&
+      !Number.isNaN(lastAtMs) &&
+      lastAtMs <= lastResetAtMs &&
+      observedAtMs > lastResetAtMs;
+    const remainingJumped = !!last && normalized >= last.remainingPercent + ROLLOVER_PERCENT_JUMP;
+
+    if (resetChanged || resetPassed || remainingJumped) {
+      series.points = [];
+    }
+
+    if (
+      !last ||
+      resetChanged ||
+      resetPassed ||
+      remainingJumped ||
+      Math.abs(last.remainingPercent - normalized) > 0.01
+    ) {
+      series.points.push({ at: observedAt, remainingPercent: normalized, resetAt: currentResetAt, sampleSource });
     } else {
-      series.points[series.points.length - 1] = { at: observedAt, remainingPercent: normalized };
+      series.points[series.points.length - 1] = {
+        at: observedAt,
+        remainingPercent: normalized,
+        resetAt: currentResetAt,
+        sampleSource,
+      };
     }
 
     if (series.points.length > MAX_POINTS_PER_QUOTA) {

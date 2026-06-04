@@ -412,6 +412,13 @@ export async function fetchAmpSnapshot(input?: string | AmpFetchOptions): Promis
   const resetAt = parseDateLike(usage.resetAt) ?? estimatedResetAt;
   const windowMinutes =
     usage.windowHours !== undefined && usage.windowHours > 0 ? Math.round(usage.windowHours * 60) : undefined;
+  const windowDurationSeconds =
+    usage.windowHours !== undefined && usage.windowHours > 0 ? Math.round(usage.windowHours * 60 * 60) : undefined;
+  const resetAtMs = resetAt ? Date.parse(resetAt) : NaN;
+  const windowStartAt =
+    resetAt && windowDurationSeconds !== undefined && !Number.isNaN(resetAtMs)
+      ? new Date(resetAtMs - windowDurationSeconds * 1000).toISOString()
+      : undefined;
 
   return {
     provider: "amp",
@@ -427,6 +434,8 @@ export async function fetchAmpSnapshot(input?: string | AmpFetchOptions): Promis
             ? `${formatPercent(remainingPercent ?? 0)} left (${formatPercent(usedPercent)} used of ${quota.toFixed(0)})`
             : "Usage available",
         resetAt,
+        windowStartAt,
+        windowDurationSeconds,
         status: statusFromRemainingPercent(remainingPercent),
       },
     ],

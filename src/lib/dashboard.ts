@@ -1,9 +1,9 @@
 import { ProviderId, ProviderUsageSnapshot, QuotaStatus } from "../models/usage";
 import { formatRelativeTimestamp } from "./date";
+import { formatCompactForecastHint } from "./forecast";
+import { CORE_PROVIDERS, OPTIONAL_PROVIDERS, PROVIDER_ORDER, providerTitle } from "./provider-registry";
 
-export const CORE_PROVIDERS: ProviderId[] = ["codex", "cursor", "copilot", "claude", "gemini", "antigravity"];
-export const OPTIONAL_PROVIDERS: ProviderId[] = ["openrouter", "zai", "kimi-k2", "amp", "minimax", "opencode"];
-export const PROVIDER_ORDER: ProviderId[] = [...CORE_PROVIDERS, ...OPTIONAL_PROVIDERS];
+export { CORE_PROVIDERS, OPTIONAL_PROVIDERS, PROVIDER_ORDER };
 
 export interface ProviderRowSummary {
   provider: ProviderId;
@@ -23,60 +23,14 @@ export interface RefreshSingleProviderResult {
   snapshot: ProviderUsageSnapshot;
   refreshedAt: string;
   failed: boolean;
+  failureMessage?: string;
 }
 
 export interface RefreshAllProvidersResult {
   snapshots: SnapshotMap;
   refreshedAt: string;
   failedProviders: ProviderId[];
-}
-
-function providerTitle(provider: ProviderId): string {
-  if (provider === "codex") {
-    return "Codex";
-  }
-
-  if (provider === "claude") {
-    return "Claude";
-  }
-
-  if (provider === "cursor") {
-    return "Cursor";
-  }
-
-  if (provider === "gemini") {
-    return "Gemini";
-  }
-
-  if (provider === "antigravity") {
-    return "Antigravity";
-  }
-
-  if (provider === "openrouter") {
-    return "OpenRouter";
-  }
-
-  if (provider === "zai") {
-    return "z.ai";
-  }
-
-  if (provider === "kimi-k2") {
-    return "Kimi K2";
-  }
-
-  if (provider === "amp") {
-    return "Amp";
-  }
-
-  if (provider === "minimax") {
-    return "MiniMax";
-  }
-
-  if (provider === "opencode") {
-    return "OpenCode";
-  }
-
-  return "GitHub Copilot";
+  failureMessages: Partial<Record<ProviderId, string>>;
 }
 
 function statusRank(status: QuotaStatus): number {
@@ -123,6 +77,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
     : providerTitle(snapshot.provider);
   const updatedText = `Updated ${formatRelativeTimestamp(snapshot.fetchedAt, now.getTime())}`;
   const limitsText = quotaSummaryText(snapshot);
+  const forecastText = formatCompactForecastHint(snapshot, now);
   const highlightsText = snapshot.highlights?.find((entry) => entry.trim().length > 0);
 
   if (isUnavailableSnapshot(snapshot)) {
@@ -149,6 +104,7 @@ export function summarizeProviderSnapshot(snapshot: ProviderUsageSnapshot, now =
     subtitle: `${[
       limitsText,
       snapshot.quotas.length > 1 ? `+${snapshot.quotas.length - 1} more` : undefined,
+      forecastText,
       highlightsText,
     ]
       .filter((part): part is string => !!part)
@@ -166,12 +122,14 @@ export async function refreshSingleProvider(
 ): Promise<RefreshSingleProviderResult> {
   let failed = false;
   let snapshot: ProviderUsageSnapshot;
+  let failureMessage: string | undefined;
 
   try {
     snapshot = await fetchSnapshot(provider);
   } catch (error) {
     snapshot = fallbackSnapshot(provider, error);
     failed = true;
+    failureMessage = error instanceof Error ? error.message : String(error);
   }
 
   return {
@@ -179,6 +137,7 @@ export async function refreshSingleProvider(
     snapshot,
     refreshedAt: now.toISOString(),
     failed,
+    failureMessage,
   };
 }
 
@@ -191,6 +150,7 @@ export async function refreshAllProviders(
 ): Promise<RefreshAllProvidersResult> {
   const next: SnapshotMap = { ...current };
   const failedProviders: ProviderId[] = [];
+  const failureMessages: Partial<Record<ProviderId, string>> = {};
 
   for (const provider of providerOrder) {
     try {
@@ -198,6 +158,7 @@ export async function refreshAllProviders(
     } catch (error) {
       next[provider] = fallbackSnapshot(provider, error);
       failedProviders.push(provider);
+      failureMessages[provider] = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -205,5 +166,6 @@ export async function refreshAllProviders(
     snapshots: next,
     refreshedAt: now.toISOString(),
     failedProviders,
+    failureMessages,
   };
 }
