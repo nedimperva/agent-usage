@@ -116,7 +116,9 @@ describe("summarizeProviderSnapshot", () => {
     const summary = summarizeProviderSnapshot(
       snapshot("gemini", {
         highlights: ["Tier: free-tier"],
-        quotas: [{ id: "gemini-pro", label: "Pro Models", remainingPercent: 48, remainingDisplay: "48% left", status: "ok" }],
+        quotas: [
+          { id: "gemini-pro", label: "Pro Models", remainingPercent: 48, remainingDisplay: "48% left", status: "ok" },
+        ],
       }),
       new Date("2026-02-23T12:00:00Z"),
     );

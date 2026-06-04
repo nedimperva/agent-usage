@@ -27,7 +27,11 @@ describe("extractLatestAntigravityQuotaLogHint", () => {
 2026-03-18 13:32:27.224 [info] E0318 13:32:27.224242 13896 log.go:398] agent executor error: RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this model. Your quota will reset after 42h0m5s.
 `.trim();
 
-    const hint = extractLatestAntigravityQuotaLogHint(logText, "C:\\Logs\\Antigravity.log", new Date("2026-03-19T00:00:00Z"));
+    const hint = extractLatestAntigravityQuotaLogHint(
+      logText,
+      "C:\\Logs\\Antigravity.log",
+      new Date("2026-03-19T00:00:00Z"),
+    );
 
     expect(hint).toBeDefined();
     expect(hint?.logPath).toBe("C:\\Logs\\Antigravity.log");
@@ -43,7 +47,11 @@ describe("extractLatestAntigravityQuotaLogHint", () => {
 2026-03-18 08:00:00.000 [info] agent executor error: RESOURCE_EXHAUSTED (code 429): You have exhausted your capacity on this model. Your quota will reset after 1h.
 `.trim();
 
-    const hint = extractLatestAntigravityQuotaLogHint(logText, "C:\\Logs\\Antigravity.log", new Date("2026-03-18T12:00:00Z"));
+    const hint = extractLatestAntigravityQuotaLogHint(
+      logText,
+      "C:\\Logs\\Antigravity.log",
+      new Date("2026-03-18T12:00:00Z"),
+    );
 
     expect(hint).toBeUndefined();
   });

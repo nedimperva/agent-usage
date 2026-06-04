@@ -62,7 +62,7 @@
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run tests",
     "publish": "ray publish"
   },
   "preferences": [

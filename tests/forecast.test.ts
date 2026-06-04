@@ -32,9 +32,24 @@ describe("deriveQuotaForecast", () => {
     const forecast = deriveQuotaForecast(
       makeQuota(),
       makeSeries([
-        { at: "2026-02-23T00:00:00Z", remainingPercent: 70, resetAt: "2026-02-23T20:00:00Z", sampleSource: "background" },
-        { at: "2026-02-23T04:00:00Z", remainingPercent: 55, resetAt: "2026-02-23T20:00:00Z", sampleSource: "background" },
-        { at: "2026-02-23T08:00:00Z", remainingPercent: 40, resetAt: "2026-02-23T20:00:00Z", sampleSource: "background" },
+        {
+          at: "2026-02-23T00:00:00Z",
+          remainingPercent: 70,
+          resetAt: "2026-02-23T20:00:00Z",
+          sampleSource: "background",
+        },
+        {
+          at: "2026-02-23T04:00:00Z",
+          remainingPercent: 55,
+          resetAt: "2026-02-23T20:00:00Z",
+          sampleSource: "background",
+        },
+        {
+          at: "2026-02-23T08:00:00Z",
+          remainingPercent: 40,
+          resetAt: "2026-02-23T20:00:00Z",
+          sampleSource: "background",
+        },
       ]),
       snapshotContext,
       new Date("2026-02-23T08:00:00Z"),

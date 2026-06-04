@@ -1,7 +1,23 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "display": "Node 18",
   "include": ["src/**/*", "tests/**/*", "raycast-env.d.ts"],
+  "exclude": [
+    "src/accounts/**/*",
+    "src/agents/**/*",
+    "src/amp/**/*",
+    "src/antigravity/**/*",
+    "src/claude/**/*",
+    "src/codex/**/*",
+    "src/copilot/**/*",
+    "src/droid/**/*",
+    "src/gemini/**/*",
+    "src/kimi/**/*",
+    "src/minimax/**/*",
+    "src/opencode-go/**/*",
+    "src/synthetic/**/*",
+    "src/zai/**/*",
+    "src/agent-usage-menubar.tsx"
+  ],
   "compilerOptions": {
     "lib": ["es2021"],
     "module": "commonjs",
