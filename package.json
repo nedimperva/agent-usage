@@ -63,7 +63,7 @@
     "lint": "ray lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "publish": "npx @raycast/api@latest publish"
+    "publish": "ray publish"
   },
   "preferences": [
     {

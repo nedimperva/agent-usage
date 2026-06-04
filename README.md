@@ -159,10 +159,9 @@ Track Codex, OpenAI API, Claude, Cursor, Gemini, Antigravity, GitHub Copilot, Ze
 ## Store publishing checklist
 
 1. Run checks: `npm run lint && npm run typecheck && npm test && npm run build`
-2. Capture screenshots: `npx @raycast/api@latest capture`
-3. Publish: `npm run publish`
+2. Publish: `npm run publish`
 
-Raycast stores captured screenshots and store metadata in a top-level `metadata/` folder.
+Run Raycast CLI commands through npm scripts or `npm exec -- ray ...`; the `ray` binary is local to this project.
 
 ## Troubleshooting
 
